@@ -23,6 +23,7 @@ const (
 const (
 	tuiRefreshInterval   = 2 * time.Second
 	tuiNotificationLimit = 8
+	tuiNotificationFlash = 2500 * time.Millisecond
 )
 
 type tuiNotification struct {
@@ -30,6 +31,7 @@ type tuiNotification struct {
 	ChatName  string
 	Timestamp time.Time
 	Text      string
+	FlashUntil time.Time
 }
 
 type tuiState struct {
@@ -61,6 +63,8 @@ type tuiState struct {
 	rightView    *tview.TextView
 	inputView    *tview.InputField
 	statusView   *tview.TextView
+
+	focusedPane string
 }
 
 func newTuiCmd(flags *rootFlags) *cobra.Command {
@@ -86,6 +90,8 @@ func newTuiCmd(flags *rootFlags) *cobra.Command {
 
 func newTuiState(flags *rootFlags) *tuiState {
 	app := tview.NewApplication()
+
+	applyTuiTheme()
 
 	chats := tview.NewList().ShowSecondaryText(false)
 	chats.SetBorder(true).SetTitle("Chats")
@@ -114,9 +120,11 @@ func newTuiState(flags *rootFlags) *tuiState {
 		lastSeenChatTS:     map[string]time.Time{},
 		lastRenderedChatTS: map[string]time.Time{},
 		refreshInterval:    tuiRefreshInterval,
+		focusedPane:        "messages",
 	}
 
 	state.wireKeys()
+	state.updateFocusBorders()
 
 	center := tview.NewFlex().SetDirection(tview.FlexRow)
 	center.AddItem(messages, 0, 1, true)
@@ -147,6 +155,7 @@ func (s *tuiState) setStore(db *store.DB) {
 func (s *tuiState) run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	s.setFocus("messages")
 	s.startRefreshLoop(ctx)
 	s.updateStatus()
 	return s.app.Run()
@@ -172,7 +181,7 @@ func (s *tuiState) wireKeys() {
 			return
 		}
 		s.selectChat(s.chats[i].JID)
-		s.app.SetFocus(s.messagesView)
+		s.setFocus("messages")
 	})
 
 	s.messagesView.SetSelectedFunc(func(i int, main, secondary string, shortcut rune) {
@@ -189,7 +198,7 @@ func (s *tuiState) wireKeys() {
 				s.inputView.SetText("")
 				s.inputView.SetLabel("")
 				s.updateStatus()
-				s.app.SetFocus(s.messagesView)
+				s.setFocus("messages")
 				return nil
 			}
 			return event
@@ -210,10 +219,10 @@ func (s *tuiState) wireKeys() {
 			s.app.Stop()
 			return nil
 		case 'h':
-			s.app.SetFocus(s.chatsView)
+			s.setFocus("chats")
 			return nil
 		case 'l':
-			s.app.SetFocus(s.messagesView)
+			s.setFocus("messages")
 			return nil
 		case 'j':
 			s.moveSelection(1)
@@ -231,13 +240,13 @@ func (s *tuiState) wireKeys() {
 			s.mode = tuiModeMessageSearch
 			s.inputView.SetLabel("search: ")
 			s.inputView.SetText("")
-			s.app.SetFocus(s.inputView)
+			s.setFocus("input")
 			return nil
 		case '?':
 			s.mode = tuiModeChatFilter
 			s.inputView.SetLabel("filter: ")
 			s.inputView.SetText("")
-			s.app.SetFocus(s.inputView)
+			s.setFocus("input")
 			return nil
 		}
 		return event
@@ -260,7 +269,7 @@ func (s *tuiState) wireKeys() {
 		s.inputView.SetText("")
 		s.inputView.SetLabel("")
 		s.updateStatus()
-		s.app.SetFocus(s.messagesView)
+		s.setFocus("messages")
 	})
 }
 
@@ -507,7 +516,12 @@ func (s *tuiState) updateRightPane() {
 		if strings.TrimSpace(label) == "" {
 			label = n.ChatJID
 		}
-		fmt.Fprintf(s.rightView, "%s  %s  %s\n", ts, truncate(label, 18), truncate(n.Text, 60))
+		line := fmt.Sprintf("%s  %s  %s", ts, truncate(label, 18), truncate(n.Text, 60))
+		if time.Now().Before(n.FlashUntil) {
+			fmt.Fprintf(s.rightView, "[yellow::b]%s[-::-]\n", line)
+		} else {
+			fmt.Fprintf(s.rightView, "%s\n", line)
+		}
 	}
 }
 
@@ -530,13 +544,14 @@ func (s *tuiState) detectNotifications(chats []store.Chat) {
 		if strings.TrimSpace(name) == "" {
 			name = c.JID
 		}
-		s.pushNotification(tuiNotification{
-			ChatJID:   c.JID,
-			ChatName:  name,
-			Timestamp: c.LastMessageTS,
-			Text:      msgText,
-		})
-	}
+	s.pushNotification(tuiNotification{
+		ChatJID:   c.JID,
+		ChatName:  name,
+		Timestamp: c.LastMessageTS,
+		Text:      msgText,
+		FlashUntil: time.Now().Add(tuiNotificationFlash),
+	})
+}
 }
 
 func (s *tuiState) latestMessageText(chatJID string) string {
@@ -579,6 +594,60 @@ func chatIndexByJID(chats []store.Chat, jid string) int {
 		}
 	}
 	return -1
+}
+
+func (s *tuiState) setFocus(pane string) {
+	switch pane {
+	case "chats":
+		s.app.SetFocus(s.chatsView)
+	case "messages":
+		s.app.SetFocus(s.messagesView)
+	case "input":
+		s.app.SetFocus(s.inputView)
+	case "right":
+		s.app.SetFocus(s.rightView)
+	}
+	if s.focusedPane != pane {
+		s.focusedPane = pane
+		s.updateFocusBorders()
+	}
+}
+
+func (s *tuiState) updateFocusBorders() {
+	focus := tcell.NewRGBColor(245, 167, 66)  // amber
+	normal := tcell.NewRGBColor(76, 86, 98)   // muted gray
+
+	apply := func(pane string, box *tview.Box) {
+		if pane == s.focusedPane {
+			box.SetBorderColor(focus)
+			box.SetTitleColor(focus)
+		} else {
+			box.SetBorderColor(normal)
+			box.SetTitleColor(normal)
+		}
+	}
+
+	apply("chats", s.chatsView.Box)
+	apply("messages", s.messagesView.Box)
+	apply("right", s.rightView.Box)
+	apply("input", s.inputView.Box)
+	apply("input", s.statusView.Box)
+}
+
+func applyTuiTheme() {
+	styles := tview.Styles
+	styles.PrimitiveBackgroundColor = tcell.NewRGBColor(20, 22, 24)
+	styles.ContrastBackgroundColor = tcell.NewRGBColor(30, 33, 36)
+	styles.MoreContrastBackgroundColor = tcell.NewRGBColor(44, 48, 54)
+	styles.BorderColor = tcell.NewRGBColor(76, 86, 98)
+	styles.TitleColor = tcell.NewRGBColor(203, 168, 106)
+	styles.GraphicsColor = tcell.NewRGBColor(76, 86, 98)
+	styles.PrimaryTextColor = tcell.NewRGBColor(214, 217, 220)
+	styles.SecondaryTextColor = tcell.NewRGBColor(160, 170, 180)
+	styles.TertiaryTextColor = tcell.NewRGBColor(120, 130, 140)
+	styles.InverseTextColor = tcell.NewRGBColor(20, 22, 24)
+	styles.ContrastSecondaryTextColor = tcell.NewRGBColor(203, 168, 106)
+	tview.Styles = styles
 }
 
 func (s *tuiState) updateStatus() {
