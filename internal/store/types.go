@@ -55,6 +55,7 @@ type Message struct {
 	Text        string
 	DisplayText string
 	MediaType   string
+	LocalPath   string
 	Snippet     string
 }
 

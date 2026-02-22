@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rivo/tview"
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 	"github.com/spf13/cobra"
 	"github.com/steipete/wacli/internal/store"
 )
@@ -27,10 +27,10 @@ const (
 )
 
 type tuiNotification struct {
-	ChatJID   string
-	ChatName  string
-	Timestamp time.Time
-	Text      string
+	ChatJID    string
+	ChatName   string
+	Timestamp  time.Time
+	Text       string
 	FlashUntil time.Time
 }
 
@@ -109,14 +109,14 @@ func newTuiState(flags *rootFlags) *tuiState {
 	status.SetTextAlign(tview.AlignLeft)
 
 	state := &tuiState{
-		app:          app,
-		flags:        flags,
-		mode:         tuiModeNormal,
-		chatsView:    chats,
-		messagesView: messages,
-		rightView:    right,
-		inputView:    input,
-		statusView:   status,
+		app:                app,
+		flags:              flags,
+		mode:               tuiModeNormal,
+		chatsView:          chats,
+		messagesView:       messages,
+		rightView:          right,
+		inputView:          input,
+		statusView:         status,
 		lastSeenChatTS:     map[string]time.Time{},
 		lastRenderedChatTS: map[string]time.Time{},
 		refreshInterval:    tuiRefreshInterval,
@@ -447,6 +447,10 @@ func (s *tuiState) reloadMessages(keepSelection bool) {
 	}
 	s.messages = msgs
 	s.messagesView.Clear()
+	_, _, width, _ := s.messagesView.GetInnerRect()
+	if width <= 0 {
+		width = 80
+	}
 	for _, m := range msgs {
 		from := m.SenderJID
 		if m.FromMe {
@@ -456,11 +460,26 @@ func (s *tuiState) reloadMessages(keepSelection bool) {
 		if text == "" {
 			text = strings.TrimSpace(m.Text)
 		}
-		if m.MediaType != "" && text == "" {
+		if strings.EqualFold(m.MediaType, "image") {
+			local := strings.TrimSpace(m.LocalPath)
+			if local != "" {
+				text = "image | local: " + local
+			} else {
+				text = fmt.Sprintf("image | download: wacli media download --chat %s --id %s", m.ChatJID, m.MsgID)
+			}
+		} else if m.MediaType != "" && text == "" {
 			text = "Sent " + m.MediaType
 		}
-		ts := m.Timestamp.Local().Format("2006-01-02 15:04")
-		line := fmt.Sprintf("%s  %-12s  %s", ts, truncate(from, 12), truncate(text, 80))
+		ts := m.Timestamp.Local().Format("15:04")
+		line := ""
+		if m.FromMe {
+			out := fmt.Sprintf("%s  %s", truncate(text, width-8), ts)
+			line = padLeft(out, width)
+		} else {
+			fromLabel := truncate(from, 12)
+			in := fmt.Sprintf("%s  %s: %s", ts, fromLabel, truncate(text, width-20))
+			line = truncate(in, width)
+		}
 		s.messagesView.AddItem(line, "", 0, nil)
 	}
 	if keepSelection {
@@ -518,7 +537,7 @@ func (s *tuiState) updateRightPane() {
 		}
 		line := fmt.Sprintf("%s  %s  %s", ts, truncate(label, 18), truncate(n.Text, 60))
 		if time.Now().Before(n.FlashUntil) {
-			fmt.Fprintf(s.rightView, "[yellow::b]%s[-::-]\n", line)
+			fmt.Fprintf(s.rightView, "[black:#f5a742]%s[-:-:-]\n", line)
 		} else {
 			fmt.Fprintf(s.rightView, "%s\n", line)
 		}
@@ -544,14 +563,14 @@ func (s *tuiState) detectNotifications(chats []store.Chat) {
 		if strings.TrimSpace(name) == "" {
 			name = c.JID
 		}
-	s.pushNotification(tuiNotification{
-		ChatJID:   c.JID,
-		ChatName:  name,
-		Timestamp: c.LastMessageTS,
-		Text:      msgText,
-		FlashUntil: time.Now().Add(tuiNotificationFlash),
-	})
-}
+		s.pushNotification(tuiNotification{
+			ChatJID:    c.JID,
+			ChatName:   name,
+			Timestamp:  c.LastMessageTS,
+			Text:       msgText,
+			FlashUntil: time.Now().Add(tuiNotificationFlash),
+		})
+	}
 }
 
 func (s *tuiState) latestMessageText(chatJID string) string {
@@ -614,8 +633,8 @@ func (s *tuiState) setFocus(pane string) {
 }
 
 func (s *tuiState) updateFocusBorders() {
-	focus := tcell.NewRGBColor(245, 167, 66)  // amber
-	normal := tcell.NewRGBColor(76, 86, 98)   // muted gray
+	focus := tcell.NewRGBColor(245, 167, 66) // amber
+	normal := tcell.NewRGBColor(76, 86, 98)  // muted gray
 
 	apply := func(pane string, box *tview.Box) {
 		if pane == s.focusedPane {
@@ -675,4 +694,14 @@ func (s *tuiState) updateStatus() {
 		status = fmt.Sprintf("%s | search: %s", status, truncate(s.msgQuery, 18))
 	}
 	s.statusView.SetText(status)
+}
+
+func padLeft(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	if len(s) >= width {
+		return s
+	}
+	return strings.Repeat(" ", width-len(s)) + s
 }
