@@ -170,15 +170,27 @@ func migrateMessagesDisplayText(d *DB) error {
 func migrateMessagesFTS(d *DB) error {
 	ftsExists, err := d.tableExists("messages_fts")
 	if err != nil {
+		if isFTSUnavailable(err) {
+			d.ftsEnabled = false
+			return nil
+		}
 		return err
 	}
 	if ftsExists {
 		hasDisplay, err := d.tableHasColumn("messages_fts", "display_text")
 		if err != nil {
+			if isFTSUnavailable(err) {
+				d.ftsEnabled = false
+				return nil
+			}
 			return err
 		}
 		if !hasDisplay {
 			if _, err := d.sql.Exec(`DROP TABLE IF EXISTS messages_fts`); err != nil {
+				if isFTSUnavailable(err) {
+					d.ftsEnabled = false
+					return nil
+				}
 				return fmt.Errorf("drop messages_fts: %w", err)
 			}
 			ftsExists = false
@@ -225,6 +237,10 @@ func migrateMessagesFTS(d *DB) error {
 			VALUES (new.rowid, COALESCE(new.text,''), COALESCE(new.media_caption,''), COALESCE(new.filename,''), COALESCE(new.chat_name,''), COALESCE(new.sender_name,''), COALESCE(new.display_text,''));
 		END;
 	`); err != nil {
+		if isFTSUnavailable(err) {
+			d.ftsEnabled = false
+			return nil
+		}
 		d.ftsEnabled = false
 		return nil
 	}
@@ -241,6 +257,10 @@ func migrateMessagesFTS(d *DB) error {
 			       COALESCE(display_text,'')
 			FROM messages
 		`); err != nil {
+			if isFTSUnavailable(err) {
+				d.ftsEnabled = false
+				return nil
+			}
 			d.ftsEnabled = false
 			return nil
 		}
@@ -248,6 +268,17 @@ func migrateMessagesFTS(d *DB) error {
 
 	d.ftsEnabled = true
 	return nil
+}
+
+func isFTSUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "no such module") {
+		return false
+	}
+	return strings.Contains(msg, "fts")
 }
 
 func (d *DB) tableExists(table string) (bool, error) {
