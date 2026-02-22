@@ -20,6 +20,18 @@ const (
 	tuiModeMessageSearch
 )
 
+const (
+	tuiRefreshInterval   = 2 * time.Second
+	tuiNotificationLimit = 8
+)
+
+type tuiNotification struct {
+	ChatJID   string
+	ChatName  string
+	Timestamp time.Time
+	Text      string
+}
+
 type tuiState struct {
 	app *tview.Application
 
@@ -36,6 +48,13 @@ type tuiState struct {
 
 	selectedChatJID string
 	selectedMsgIdx  int
+
+	lastSeenChatTS     map[string]time.Time
+	lastRenderedChatTS map[string]time.Time
+	notifications      []tuiNotification
+
+	refreshInterval time.Duration
+	skipChatChange  bool
 
 	chatsView    *tview.List
 	messagesView *tview.List
@@ -92,6 +111,9 @@ func newTuiState(flags *rootFlags) *tuiState {
 		rightView:    right,
 		inputView:    input,
 		statusView:   status,
+		lastSeenChatTS:     map[string]time.Time{},
+		lastRenderedChatTS: map[string]time.Time{},
+		refreshInterval:    tuiRefreshInterval,
 	}
 
 	state.wireKeys()
@@ -123,12 +145,18 @@ func (s *tuiState) setStore(db *store.DB) {
 }
 
 func (s *tuiState) run() error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.startRefreshLoop(ctx)
 	s.updateStatus()
 	return s.app.Run()
 }
 
 func (s *tuiState) wireKeys() {
 	s.chatsView.SetChangedFunc(func(i int, main, secondary string, shortcut rune) {
+		if s.skipChatChange {
+			return
+		}
 		_ = main
 		_ = secondary
 		_ = shortcut
@@ -226,7 +254,7 @@ func (s *tuiState) wireKeys() {
 			s.reloadChats()
 		case tuiModeMessageSearch:
 			s.msgQuery = text
-			s.reloadMessages()
+			s.reloadMessages(false)
 		}
 		s.mode = tuiModeNormal
 		s.inputView.SetText("")
@@ -292,6 +320,34 @@ func maxIndex(count int) int {
 }
 
 func (s *tuiState) reloadChats() {
+	s.loadChats(false)
+}
+
+func (s *tuiState) startRefreshLoop(ctx context.Context) {
+	if s.refreshInterval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(s.refreshInterval)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.app.QueueUpdateDraw(func() {
+					s.refreshFromStore()
+				})
+			}
+		}
+	}()
+}
+
+func (s *tuiState) refreshFromStore() {
+	s.loadChats(true)
+}
+
+func (s *tuiState) loadChats(preserveSelection bool) {
 	if s.db == nil {
 		return
 	}
@@ -301,6 +357,7 @@ func (s *tuiState) reloadChats() {
 		return
 	}
 	s.chats = chats
+	prevSelected := s.selectedChatJID
 	s.chatsView.Clear()
 	for _, c := range chats {
 		name := c.Name
@@ -310,10 +367,36 @@ func (s *tuiState) reloadChats() {
 		line := fmt.Sprintf("%s  %s", truncate(name, 28), c.Kind)
 		s.chatsView.AddItem(line, "", 0, nil)
 	}
-	if len(chats) > 0 {
-		s.chatsView.SetCurrentItem(0)
-		s.selectChat(chats[0].JID)
+	if len(chats) == 0 {
+		s.selectedChatJID = ""
+		s.messagesView.Clear()
+		s.updateRightPane()
+		s.updateStatus()
+		return
 	}
+	selectedIdx := 0
+	if preserveSelection && strings.TrimSpace(prevSelected) != "" {
+		if idx := chatIndexByJID(chats, prevSelected); idx >= 0 {
+			selectedIdx = idx
+		} else {
+			prevSelected = ""
+		}
+	}
+	if !preserveSelection || strings.TrimSpace(prevSelected) == "" {
+		selectedIdx = 0
+	}
+	s.skipChatChange = true
+	s.chatsView.SetCurrentItem(selectedIdx)
+	s.skipChatChange = false
+	selectedJID := chats[selectedIdx].JID
+	if selectedJID != s.selectedChatJID {
+		s.selectedChatJID = selectedJID
+		s.reloadMessages(false)
+	} else if preserveSelection {
+		s.maybeReloadMessages(chats[selectedIdx])
+	}
+	s.detectNotifications(chats)
+	s.updateRightPane()
 	s.updateStatus()
 }
 
@@ -322,11 +405,11 @@ func (s *tuiState) selectChat(jid string) {
 		return
 	}
 	s.selectedChatJID = jid
-	s.reloadMessages()
+	s.reloadMessages(false)
 	s.updateRightPane()
 }
 
-func (s *tuiState) reloadMessages() {
+func (s *tuiState) reloadMessages(keepSelection bool) {
 	if s.db == nil {
 		return
 	}
@@ -334,6 +417,7 @@ func (s *tuiState) reloadMessages() {
 		s.messagesView.Clear()
 		return
 	}
+	prevIdx := s.messagesView.GetCurrentItem()
 	var msgs []store.Message
 	var err error
 	if strings.TrimSpace(s.msgQuery) != "" {
@@ -370,8 +454,24 @@ func (s *tuiState) reloadMessages() {
 		line := fmt.Sprintf("%s  %-12s  %s", ts, truncate(from, 12), truncate(text, 80))
 		s.messagesView.AddItem(line, "", 0, nil)
 	}
-	s.messagesView.SetCurrentItem(0)
+	if keepSelection {
+		s.messagesView.SetCurrentItem(clampIndex(prevIdx, len(msgs)))
+	} else {
+		s.messagesView.SetCurrentItem(0)
+	}
+	if len(msgs) > 0 {
+		s.lastRenderedChatTS[s.selectedChatJID] = msgs[0].Timestamp
+	} else {
+		s.lastRenderedChatTS[s.selectedChatJID] = time.Time{}
+	}
 	s.updateStatus()
+}
+
+func (s *tuiState) maybeReloadMessages(chat store.Chat) {
+	lastRendered := s.lastRenderedChatTS[chat.JID]
+	if chat.LastMessageTS.After(lastRendered) {
+		s.reloadMessages(true)
+	}
 }
 
 func (s *tuiState) updateRightPane() {
@@ -395,6 +495,90 @@ func (s *tuiState) updateRightPane() {
 	}
 	fmt.Fprintf(s.rightView, "Name: %s\nJID: %s\nKind: %s\nLast: %s\n", name, chat.JID, chat.Kind, last)
 	fmt.Fprintf(s.rightView, "\nParticipants: (v1)\nMedia stats: (v1)\nTags: (v1)\n")
+	fmt.Fprintf(s.rightView, "\nNotifications:\n")
+	if len(s.notifications) == 0 {
+		fmt.Fprintf(s.rightView, "(none)\n")
+		return
+	}
+	for i := len(s.notifications) - 1; i >= 0; i-- {
+		n := s.notifications[i]
+		ts := n.Timestamp.Local().Format("15:04:05")
+		label := n.ChatName
+		if strings.TrimSpace(label) == "" {
+			label = n.ChatJID
+		}
+		fmt.Fprintf(s.rightView, "%s  %s  %s\n", ts, truncate(label, 18), truncate(n.Text, 60))
+	}
+}
+
+func (s *tuiState) detectNotifications(chats []store.Chat) {
+	for _, c := range chats {
+		if c.LastMessageTS.IsZero() {
+			continue
+		}
+		lastSeen, ok := s.lastSeenChatTS[c.JID]
+		if !ok {
+			s.lastSeenChatTS[c.JID] = c.LastMessageTS
+			continue
+		}
+		if !c.LastMessageTS.After(lastSeen) {
+			continue
+		}
+		s.lastSeenChatTS[c.JID] = c.LastMessageTS
+		msgText := s.latestMessageText(c.JID)
+		name := c.Name
+		if strings.TrimSpace(name) == "" {
+			name = c.JID
+		}
+		s.pushNotification(tuiNotification{
+			ChatJID:   c.JID,
+			ChatName:  name,
+			Timestamp: c.LastMessageTS,
+			Text:      msgText,
+		})
+	}
+}
+
+func (s *tuiState) latestMessageText(chatJID string) string {
+	msgs, err := s.db.ListMessages(store.ListMessagesParams{
+		ChatJID: chatJID,
+		Limit:   1,
+	})
+	if err != nil || len(msgs) == 0 {
+		return "(message)"
+	}
+	m := msgs[0]
+	text := strings.TrimSpace(m.DisplayText)
+	if text == "" {
+		text = strings.TrimSpace(m.Text)
+	}
+	if m.MediaType != "" && text == "" {
+		text = "Sent " + m.MediaType
+	}
+	if text == "" {
+		text = "(message)"
+	}
+	return text
+}
+
+func (s *tuiState) pushNotification(n tuiNotification) {
+	s.notifications = append(s.notifications, n)
+	if len(s.notifications) <= tuiNotificationLimit {
+		return
+	}
+	over := len(s.notifications) - tuiNotificationLimit
+	if over > 0 {
+		s.notifications = append([]tuiNotification{}, s.notifications[over:]...)
+	}
+}
+
+func chatIndexByJID(chats []store.Chat, jid string) int {
+	for i, c := range chats {
+		if c.JID == jid {
+			return i
+		}
+	}
+	return -1
 }
 
 func (s *tuiState) updateStatus() {
