@@ -223,19 +223,42 @@ func chatKind(chat types.JID) string {
 	return "unknown"
 }
 
+func normalizeChatJID(chat types.JID) types.JID {
+	if chat.Server == types.GroupServer || chat.IsBroadcastList() {
+		return chat
+	}
+	if chat.Server == "lid" {
+		return types.JID{User: chat.User, Server: types.DefaultUserServer}
+	}
+	return chat.ToNonAD()
+}
+
 func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error {
-	chatJID := pm.Chat.String()
-	chatName := a.wa.ResolveChatName(ctx, pm.Chat, pm.PushName)
-	if err := a.db.UpsertChat(chatJID, chatKind(pm.Chat), chatName, pm.Timestamp); err != nil {
+	chat := normalizeChatJID(pm.Chat)
+	if pm.SenderJID != "" {
+		if jid, err := types.ParseJID(pm.SenderJID); err == nil {
+			if jid.Server == "lid" {
+				jid = types.JID{User: jid.User, Server: types.DefaultUserServer}
+			} else {
+				jid = jid.ToNonAD()
+			}
+			pm.SenderJID = jid.String()
+		}
+	}
+	pm.Chat = chat
+
+	chatJID := chat.String()
+	chatName := a.wa.ResolveChatName(ctx, chat, pm.PushName)
+	if err := a.db.UpsertChat(chatJID, chatKind(chat), chatName, pm.Timestamp); err != nil {
 		return err
 	}
 
 	// Best-effort: store contact info for DMs.
-	if pm.Chat.Server == types.DefaultUserServer {
-		if info, err := a.wa.GetContact(ctx, pm.Chat.ToNonAD()); err == nil {
+	if chat.Server == types.DefaultUserServer {
+		if info, err := a.wa.GetContact(ctx, chat); err == nil {
 			_ = a.db.UpsertContact(
-				pm.Chat.String(),
-				pm.Chat.User,
+				chat.String(),
+				chat.User,
 				info.PushName,
 				info.FullName,
 				info.FirstName,
@@ -252,7 +275,8 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 	}
 	if pm.SenderJID != "" {
 		if jid, err := types.ParseJID(pm.SenderJID); err == nil {
-			if info, err := a.wa.GetContact(ctx, jid.ToNonAD()); err == nil {
+			jid = normalizeChatJID(jid)
+			if info, err := a.wa.GetContact(ctx, jid); err == nil {
 				if name := wa.BestContactName(info); name != "" {
 					senderName = name
 				}
@@ -269,8 +293,8 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 	}
 
 	// Best-effort: store group metadata (and participants) when available.
-	if pm.Chat.Server == types.GroupServer {
-		if gi, err := a.wa.GetGroupInfo(ctx, pm.Chat); err == nil && gi != nil {
+	if chat.Server == types.GroupServer {
+		if gi, err := a.wa.GetGroupInfo(ctx, chat); err == nil && gi != nil {
 			_ = a.db.UpsertGroup(gi.JID.String(), gi.GroupName.Name, gi.OwnerJID.String(), gi.GroupCreated)
 			var ps []store.GroupParticipant
 			for _, p := range gi.Participants {
@@ -281,12 +305,12 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 					role = "admin"
 				}
 				ps = append(ps, store.GroupParticipant{
-					GroupJID: pm.Chat.String(),
+					GroupJID: chat.String(),
 					UserJID:  p.JID.String(),
 					Role:     role,
 				})
 			}
-			_ = a.db.ReplaceGroupParticipants(pm.Chat.String(), ps)
+			_ = a.db.ReplaceGroupParticipants(chat.String(), ps)
 		}
 	}
 
