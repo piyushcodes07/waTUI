@@ -380,6 +380,9 @@ func (s *tuiState) loadChats(preserveSelection bool) {
 	prevSelected := s.selectedChatJID
 	s.chatsView.Clear()
 	for _, c := range chats {
+		if shouldHideDMChat(c.JID, c.Kind) {
+			continue
+		}
 		name := strings.TrimSpace(c.Name)
 		if name == "" && c.Kind == "dm" && strings.HasSuffix(c.JID, "@s.whatsapp.net") {
 			if contact, err := s.db.GetContact(c.JID); err == nil {
@@ -660,6 +663,29 @@ func chatIndexByJID(chats []store.Chat, jid string) int {
 		}
 	}
 	return -1
+}
+
+func shouldHideDMChat(jid, kind string) bool {
+	if kind != "dm" {
+		return false
+	}
+	jid = strings.TrimSpace(jid)
+	if !strings.HasSuffix(jid, "@s.whatsapp.net") {
+		return false
+	}
+	user := strings.TrimSuffix(jid, "@s.whatsapp.net")
+	if user == "" {
+		return false
+	}
+	if len(user) < 13 {
+		return false
+	}
+	for _, r := range user {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *tuiState) setFocus(pane string) {
