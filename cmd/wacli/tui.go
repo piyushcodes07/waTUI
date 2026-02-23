@@ -386,7 +386,7 @@ func (s *tuiState) loadChats(preserveSelection bool) {
 				if contact, err := s.db.GetContact(c.JID); err == nil && strings.TrimSpace(contact.Name) != "" {
 					name = contact.Name
 				} else {
-					name = c.JID
+					name = strings.TrimSuffix(c.JID, "@s.whatsapp.net")
 				}
 			} else {
 				name = c.JID
