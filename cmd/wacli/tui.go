@@ -376,27 +376,23 @@ func (s *tuiState) loadChats(preserveSelection bool) {
 		s.statusView.SetText(fmt.Sprintf("error: %v", err))
 		return
 	}
-	s.chats = chats
+	filtered := make([]store.Chat, 0, len(chats))
 	prevSelected := s.selectedChatJID
 	s.chatsView.Clear()
 	for _, c := range chats {
-		name := strings.TrimSpace(c.Name)
-		if name == "" && c.Kind == "dm" && strings.HasSuffix(c.JID, "@s.whatsapp.net") {
-			if contact, err := s.db.GetContact(c.JID); err == nil {
-				name = strings.TrimSpace(contact.Name)
-			}
+		if c.Kind == "dm" && strings.HasSuffix(c.JID, "@s.whatsapp.net") {
+			continue
 		}
+		name := strings.TrimSpace(c.Name)
 		if name == "" {
-			// Hide unnamed DM chats that only have a raw JID.
-			if c.Kind == "dm" && strings.HasSuffix(c.JID, "@s.whatsapp.net") {
-				continue
-			}
 			name = c.JID
 		}
 		line := fmt.Sprintf("%s  %s", truncate(name, 28), c.Kind)
 		s.chatsView.AddItem(line, "", 0, nil)
+		filtered = append(filtered, c)
 	}
-	if len(chats) == 0 {
+	s.chats = filtered
+	if len(filtered) == 0 {
 		s.selectedChatJID = ""
 		s.messagesView.Clear()
 		s.updateRightPane()
@@ -405,7 +401,7 @@ func (s *tuiState) loadChats(preserveSelection bool) {
 	}
 	selectedIdx := 0
 	if preserveSelection && strings.TrimSpace(prevSelected) != "" {
-		if idx := chatIndexByJID(chats, prevSelected); idx >= 0 {
+		if idx := chatIndexByJID(filtered, prevSelected); idx >= 0 {
 			selectedIdx = idx
 		} else {
 			prevSelected = ""
@@ -417,14 +413,14 @@ func (s *tuiState) loadChats(preserveSelection bool) {
 	s.skipChatChange = true
 	s.chatsView.SetCurrentItem(selectedIdx)
 	s.skipChatChange = false
-	selectedJID := chats[selectedIdx].JID
+	selectedJID := filtered[selectedIdx].JID
 	if selectedJID != s.selectedChatJID {
 		s.selectedChatJID = selectedJID
 		s.reloadMessages(false)
 	} else if preserveSelection {
-		s.maybeReloadMessages(chats[selectedIdx])
+		s.maybeReloadMessages(filtered[selectedIdx])
 	}
-	s.detectNotifications(chats)
+	s.detectNotifications(filtered)
 	s.updateRightPane()
 	s.updateStatus()
 }
