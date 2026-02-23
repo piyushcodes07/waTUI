@@ -50,6 +50,7 @@ type tuiState struct {
 
 	selectedChatJID string
 	selectedMsgIdx  int
+	followBottom    bool
 
 	lastSeenChatTS     map[string]time.Time
 	lastRenderedChatTS map[string]time.Time
@@ -121,6 +122,7 @@ func newTuiState(flags *rootFlags) *tuiState {
 		lastRenderedChatTS: map[string]time.Time{},
 		refreshInterval:    tuiRefreshInterval,
 		focusedPane:        "messages",
+		followBottom:       true,
 	}
 
 	state.wireKeys()
@@ -281,7 +283,13 @@ func (s *tuiState) moveSelection(delta int) {
 	}
 	if s.app.GetFocus() == s.messagesView {
 		idx := s.messagesView.GetCurrentItem()
-		s.messagesView.SetCurrentItem(clampIndex(idx+delta, s.messagesView.GetItemCount()))
+		next := clampIndex(idx+delta, s.messagesView.GetItemCount())
+		s.messagesView.SetCurrentItem(next)
+		if delta < 0 {
+			s.followBottom = false
+		} else if next >= s.messagesView.GetItemCount()-1 {
+			s.followBottom = true
+		}
 		return
 	}
 }
@@ -293,6 +301,7 @@ func (s *tuiState) jumpTop() {
 	}
 	if s.app.GetFocus() == s.messagesView {
 		s.messagesView.SetCurrentItem(0)
+		s.followBottom = false
 		return
 	}
 }
@@ -304,6 +313,7 @@ func (s *tuiState) jumpBottom() {
 	}
 	if s.app.GetFocus() == s.messagesView {
 		s.messagesView.SetCurrentItem(maxIndex(s.messagesView.GetItemCount()))
+		s.followBottom = true
 		return
 	}
 }
@@ -427,6 +437,8 @@ func (s *tuiState) reloadMessages(keepSelection bool) {
 		return
 	}
 	prevIdx := s.messagesView.GetCurrentItem()
+	prevCount := s.messagesView.GetItemCount()
+	wasAtBottom := prevCount > 0 && prevIdx >= prevCount-1
 	var msgs []store.Message
 	var err error
 	if strings.TrimSpace(s.msgQuery) != "" {
@@ -444,6 +456,10 @@ func (s *tuiState) reloadMessages(keepSelection bool) {
 	if err != nil {
 		s.statusView.SetText(fmt.Sprintf("error: %v", err))
 		return
+	}
+	// DB returns newest first; render oldest -> newest.
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
 	}
 	s.messages = msgs
 	s.messagesView.Clear()
@@ -471,24 +487,44 @@ func (s *tuiState) reloadMessages(keepSelection bool) {
 			text = "Sent " + m.MediaType
 		}
 		ts := m.Timestamp.Local().Format("15:04")
-		line := ""
 		if m.FromMe {
-			out := fmt.Sprintf("%s  %s", truncate(text, width-8), ts)
-			line = padLeft(out, width)
+			lines := wrapText(text, width-8)
+			for i, ln := range lines {
+				out := ln
+				if i == 0 {
+					out = fmt.Sprintf("%s  %s", ln, ts)
+				}
+				s.messagesView.AddItem(padLeft(out, width), "", 0, nil)
+			}
 		} else {
 			fromLabel := truncate(from, 12)
-			in := fmt.Sprintf("%s  %s: %s", ts, fromLabel, truncate(text, width-20))
-			line = truncate(in, width)
+			prefix := fmt.Sprintf("%s  %s: ", ts, fromLabel)
+			lines := wrapText(text, max(1, width-len(prefix)))
+			for i, ln := range lines {
+				line := ln
+				if i == 0 {
+					line = prefix + ln
+				}
+				line = truncate(line, width)
+				line = fmt.Sprintf("[#cba86a:#1e2124]%s[-:-:-]", line)
+				s.messagesView.AddItem(line, "", 0, nil)
+			}
 		}
-		s.messagesView.AddItem(line, "", 0, nil)
+		s.messagesView.AddItem("", "", 0, nil)
 	}
+	itemCount := s.messagesView.GetItemCount()
 	if keepSelection {
-		s.messagesView.SetCurrentItem(clampIndex(prevIdx, len(msgs)))
+		if s.followBottom || wasAtBottom {
+			s.messagesView.SetCurrentItem(maxIndex(itemCount))
+		} else {
+			s.messagesView.SetCurrentItem(clampIndex(prevIdx, itemCount))
+		}
 	} else {
-		s.messagesView.SetCurrentItem(0)
+		s.followBottom = true
+		s.messagesView.SetCurrentItem(maxIndex(itemCount))
 	}
 	if len(msgs) > 0 {
-		s.lastRenderedChatTS[s.selectedChatJID] = msgs[0].Timestamp
+		s.lastRenderedChatTS[s.selectedChatJID] = msgs[len(msgs)-1].Timestamp
 	} else {
 		s.lastRenderedChatTS[s.selectedChatJID] = time.Time{}
 	}
@@ -704,4 +740,39 @@ func padLeft(s string, width int) string {
 		return s
 	}
 	return strings.Repeat(" ", width-len(s)) + s
+}
+
+func wrapText(s string, width int) []string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.TrimSpace(s)
+	if width <= 0 {
+		return []string{s}
+	}
+	if s == "" {
+		return []string{""}
+	}
+	var lines []string
+	for len(s) > 0 {
+		if len(s) <= width {
+			lines = append(lines, s)
+			break
+		}
+		cut := strings.LastIndexAny(s[:width+1], " \t")
+		if cut <= 0 {
+			cut = width
+		}
+		lines = append(lines, strings.TrimSpace(s[:cut]))
+		s = strings.TrimSpace(s[cut:])
+	}
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
