@@ -95,7 +95,8 @@ func newTuiState(flags *rootFlags) *tuiState {
 	applyTuiTheme()
 
 	chats := tview.NewList().ShowSecondaryText(false)
-	chats.SetBorder(true).SetTitle("Chats")
+	chats.SetBorder(true).SetTitle("whatsTUI")
+	chats.SetTitleAlign(tview.AlignLeft)
 
 	messages := tview.NewList().ShowSecondaryText(false)
 	messages.SetBorder(true).SetTitle("Messages")
@@ -381,7 +382,15 @@ func (s *tuiState) loadChats(preserveSelection bool) {
 	for _, c := range chats {
 		name := c.Name
 		if strings.TrimSpace(name) == "" {
-			name = c.JID
+			if c.Kind == "dm" && strings.HasSuffix(c.JID, "@s.whatsapp.net") {
+				if contact, err := s.db.GetContact(c.JID); err == nil && strings.TrimSpace(contact.Name) != "" {
+					name = contact.Name
+				} else {
+					name = c.JID
+				}
+			} else {
+				name = c.JID
+			}
 		}
 		line := fmt.Sprintf("%s  %s", truncate(name, 28), c.Kind)
 		s.chatsView.AddItem(line, "", 0, nil)
