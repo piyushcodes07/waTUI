@@ -380,17 +380,18 @@ func (s *tuiState) loadChats(preserveSelection bool) {
 	prevSelected := s.selectedChatJID
 	s.chatsView.Clear()
 	for _, c := range chats {
-		name := c.Name
-		if strings.TrimSpace(name) == "" {
-			if c.Kind == "dm" && strings.HasSuffix(c.JID, "@s.whatsapp.net") {
-				if contact, err := s.db.GetContact(c.JID); err == nil && strings.TrimSpace(contact.Name) != "" {
-					name = contact.Name
-				} else {
-					name = strings.TrimSuffix(c.JID, "@s.whatsapp.net")
-				}
-			} else {
-				name = c.JID
+		name := strings.TrimSpace(c.Name)
+		if name == "" && c.Kind == "dm" && strings.HasSuffix(c.JID, "@s.whatsapp.net") {
+			if contact, err := s.db.GetContact(c.JID); err == nil {
+				name = strings.TrimSpace(contact.Name)
 			}
+		}
+		if name == "" {
+			// Hide unnamed DM chats that only have a raw JID.
+			if c.Kind == "dm" && strings.HasSuffix(c.JID, "@s.whatsapp.net") {
+				continue
+			}
+			name = c.JID
 		}
 		line := fmt.Sprintf("%s  %s", truncate(name, 28), c.Kind)
 		s.chatsView.AddItem(line, "", 0, nil)
