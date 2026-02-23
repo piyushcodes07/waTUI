@@ -380,11 +380,16 @@ func (s *tuiState) loadChats(preserveSelection bool) {
 	prevSelected := s.selectedChatJID
 	s.chatsView.Clear()
 	for _, c := range chats {
-		if c.Kind == "dm" && strings.HasSuffix(c.JID, "@s.whatsapp.net") {
-			continue
-		}
 		name := strings.TrimSpace(c.Name)
+		if name == "" && c.Kind == "dm" && strings.HasSuffix(c.JID, "@s.whatsapp.net") {
+			if contact, err := s.db.GetContact(c.JID); err == nil {
+				name = strings.TrimSpace(contact.Name)
+			}
+		}
 		if name == "" {
+			if c.Kind == "dm" && strings.HasSuffix(c.JID, "@s.whatsapp.net") {
+				continue
+			}
 			name = c.JID
 		}
 		line := fmt.Sprintf("%s  %s", truncate(name, 28), c.Kind)
