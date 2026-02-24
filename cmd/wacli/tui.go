@@ -798,7 +798,7 @@ func (s *tuiState) updateRightPane() {
 	}
 	fmt.Fprintf(s.rightView, "Name: %s\nJID: %s\nKind: %s\nLast: %s\n", name, chat.JID, chat.Kind, last)
 	fmt.Fprintf(s.rightView, "\nParticipants: (v1)\nMedia stats: (v1)\nTags: (v1)\n")
-	fmt.Fprintf(s.rightView, "\nNotifications:\n")
+	fmt.Fprintf(s.rightView, "\n[#00D48A]NOTIFICATIONS[-]\n")
 	if len(s.notifications) == 0 {
 		fmt.Fprintf(s.rightView, "(none)\n")
 		return
@@ -810,7 +810,7 @@ func (s *tuiState) updateRightPane() {
 		if strings.TrimSpace(label) == "" {
 			label = n.ChatJID
 		}
-		line := fmt.Sprintf("%s  %s  %s", ts, truncate(label, 18), truncate(n.Text, 60))
+		line := fmt.Sprintf("[#cba86a]✦[-] %s  %s  %s", ts, truncate(label, 18), truncate(n.Text, 60))
 		if time.Now().Before(n.FlashUntil) {
 			fmt.Fprintf(s.rightView, "[black:#f5a742]%s[-:-:-]\n", line)
 		} else {
