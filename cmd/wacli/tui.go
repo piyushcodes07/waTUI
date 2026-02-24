@@ -65,6 +65,8 @@ type tuiState struct {
 	notifications      []tuiNotification
 	lastReadChatTS     map[string]time.Time
 	unreadCounts       map[string]int
+	knownChats         map[string]bool
+	startedAt          time.Time
 
 	refreshInterval time.Duration
 	skipChatChange  bool
@@ -206,6 +208,8 @@ func newTuiState(flags *rootFlags) *tuiState {
 		lastRenderedChatTS: map[string]time.Time{},
 		lastReadChatTS:     map[string]time.Time{},
 		unreadCounts:       map[string]int{},
+		knownChats:         map[string]bool{},
+		startedAt:          time.Now().UTC(),
 		refreshInterval:    tuiRefreshInterval,
 		focusedPane:        "messages",
 		followBottom:       true,
@@ -571,8 +575,15 @@ func (s *tuiState) loadChats(preserveSelection bool) {
 		if shouldHideDMChat(c.JID, c.Kind) {
 			continue
 		}
-		if _, ok := s.lastReadChatTS[c.JID]; !ok {
-			s.lastReadChatTS[c.JID] = c.LastMessageTS
+		if !s.knownChats[c.JID] {
+			s.knownChats[c.JID] = true
+			if _, ok := s.lastReadChatTS[c.JID]; !ok {
+				if !s.startedAt.IsZero() {
+					s.lastReadChatTS[c.JID] = s.startedAt
+				} else {
+					s.lastReadChatTS[c.JID] = c.LastMessageTS
+				}
+			}
 		}
 		name := strings.TrimSpace(c.Name)
 		if name == "" && c.Kind == "dm" && strings.HasSuffix(c.JID, "@s.whatsapp.net") {
@@ -843,7 +854,18 @@ func (s *tuiState) detectNotifications(chats []store.Chat) {
 			continue
 		}
 		s.lastSeenChatTS[c.JID] = c.LastMessageTS
-		msgText := s.latestMessageText(c.JID)
+		msgs, err := s.db.ListMessages(store.ListMessagesParams{
+			ChatJID: c.JID,
+			Limit:   1,
+		})
+		if err != nil || len(msgs) == 0 {
+			continue
+		}
+		m := msgs[0]
+		if m.FromMe {
+			continue
+		}
+		msgText := s.messageText(m)
 		name := c.Name
 		if strings.TrimSpace(name) == "" {
 			name = c.JID
@@ -866,7 +888,10 @@ func (s *tuiState) latestMessageText(chatJID string) string {
 	if err != nil || len(msgs) == 0 {
 		return "(message)"
 	}
-	m := msgs[0]
+	return s.messageText(msgs[0])
+}
+
+func (s *tuiState) messageText(m store.Message) string {
 	text := strings.TrimSpace(m.DisplayText)
 	if text == "" {
 		text = strings.TrimSpace(m.Text)
