@@ -236,7 +236,7 @@ func newTuiState(flags *rootFlags) *tuiState {
 	rightCol := tview.NewFlex().SetDirection(tview.FlexRow)
 	rightCol.AddItem(syncView, 3, 0, false)
 	rightCol.AddItem(right, 0, 1, false)
-	rightCol.AddItem(keysView, 7, 0, false)
+	rightCol.AddItem(keysView, 9, 0, false)
 
 	root := tview.NewFlex().
 		AddItem(leftCol, 0, 1, true).
@@ -1077,8 +1077,8 @@ func (s *tuiState) updateKeyBindings() {
 		"[#cba86a]?[-]  search messages",
 		"[#cba86a]↑/↓[-] navigate (search/suggest)",
 		"[#cba86a]Tab[-] autocomplete file path",
-		"[#cba86a]j/k[-] up/down",
-		"[#cba86a]h/l[-] left/right",
+		"[#cba86a]j/k[-] move up/down",
+		"[#cba86a]h/l[-] move left/right",
 		"[#cba86a]g/G[-] top/bottom",
 		"[#cba86a]Esc[-] cancel input",
 		"[#cba86a]q[-]  quit",
