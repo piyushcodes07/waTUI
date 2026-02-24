@@ -63,6 +63,8 @@ type tuiState struct {
 	lastSeenChatTS     map[string]time.Time
 	lastRenderedChatTS map[string]time.Time
 	notifications      []tuiNotification
+	lastReadChatTS     map[string]time.Time
+	unreadCounts       map[string]int
 
 	refreshInterval time.Duration
 	skipChatChange  bool
@@ -202,6 +204,8 @@ func newTuiState(flags *rootFlags) *tuiState {
 		statusView:         status,
 		lastSeenChatTS:     map[string]time.Time{},
 		lastRenderedChatTS: map[string]time.Time{},
+		lastReadChatTS:     map[string]time.Time{},
+		unreadCounts:       map[string]int{},
 		refreshInterval:    tuiRefreshInterval,
 		focusedPane:        "messages",
 		followBottom:       true,
@@ -567,6 +571,9 @@ func (s *tuiState) loadChats(preserveSelection bool) {
 		if shouldHideDMChat(c.JID, c.Kind) {
 			continue
 		}
+		if _, ok := s.lastReadChatTS[c.JID]; !ok {
+			s.lastReadChatTS[c.JID] = c.LastMessageTS
+		}
 		name := strings.TrimSpace(c.Name)
 		if name == "" && c.Kind == "dm" && strings.HasSuffix(c.JID, "@s.whatsapp.net") {
 			if contact, err := s.db.GetContact(c.JID); err == nil {
@@ -579,7 +586,19 @@ func (s *tuiState) loadChats(preserveSelection bool) {
 			}
 			name = c.JID
 		}
-		line := fmt.Sprintf("%s  %s", truncate(name, 28), c.Kind)
+		count := 0
+		if lastRead, ok := s.lastReadChatTS[c.JID]; ok && c.LastMessageTS.After(lastRead) {
+			if n, err := s.db.CountMessagesAfter(c.JID, lastRead); err == nil {
+				count = n
+			}
+		}
+		s.unreadCounts[c.JID] = count
+		label := fmt.Sprintf("%s  %s", truncate(name, 28), c.Kind)
+		if count > 0 {
+			label = fmt.Sprintf("[#00D4FF]%s[-]  [#00D4FF]+%d[-]", truncate(name, 28), count)
+			label = fmt.Sprintf("%s  %s", label, c.Kind)
+		}
+		line := label
 		s.chatsView.AddItem(line, "", 0, nil)
 		filtered = append(filtered, c)
 	}
@@ -623,6 +642,12 @@ func (s *tuiState) selectChat(jid string) {
 		return
 	}
 	s.selectedChatJID = jid
+	if s.db != nil {
+		if chat, err := s.db.GetChat(jid); err == nil {
+			s.lastReadChatTS[jid] = chat.LastMessageTS
+			s.unreadCounts[jid] = 0
+		}
+	}
 	s.updateMessagesTitle()
 	s.reloadMessages(false)
 	s.updateRightPane()
