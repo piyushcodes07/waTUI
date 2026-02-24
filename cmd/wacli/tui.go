@@ -74,10 +74,16 @@ type tuiState struct {
 	rightView    *tview.TextView
 	syncView     *tview.TextView
 	inputView    *tview.InputField
+	suggestView  *tview.TextView
 	statusView   *tview.TextView
 
 	focusedPane string
 	statusNote  string
+
+	suggestItems  []string
+	suggestIndex  int
+	suggestKey    string
+	suggestActive bool
 }
 
 func newTuiCmd(flags *rootFlags) *cobra.Command {
@@ -163,6 +169,10 @@ func newTuiState(flags *rootFlags) *tuiState {
 	input := tview.NewInputField()
 	input.SetFieldWidth(0)
 
+	suggest := tview.NewTextView().SetDynamicColors(true)
+	suggest.SetTextAlign(tview.AlignLeft)
+	suggest.SetBorder(false)
+
 	status := tview.NewTextView().SetDynamicColors(true)
 	status.SetTextAlign(tview.AlignLeft)
 
@@ -175,6 +185,7 @@ func newTuiState(flags *rootFlags) *tuiState {
 		rightView:          right,
 		syncView:           syncView,
 		inputView:          input,
+		suggestView:        suggest,
 		statusView:         status,
 		lastSeenChatTS:     map[string]time.Time{},
 		lastRenderedChatTS: map[string]time.Time{},
@@ -191,6 +202,7 @@ func newTuiState(flags *rootFlags) *tuiState {
 
 	inputBox := tview.NewFlex().SetDirection(tview.FlexRow)
 	inputBox.AddItem(input, 1, 0, false)
+	inputBox.AddItem(suggest, 4, 0, false)
 	inputBox.AddItem(status, 1, 0, false)
 	inputBox.SetBorder(true).SetTitle("Send").SetTitleAlign(tview.AlignLeft)
 
@@ -267,10 +279,25 @@ func (s *tuiState) wireKeys() {
 					return nil
 				}
 			}
+			if s.mode == tuiModeSendFile && s.suggestActive {
+				switch event.Key() {
+				case tcell.KeyUp:
+					s.suggestIndex = clampIndex(s.suggestIndex-1, len(s.suggestItems))
+					s.updateSuggestions()
+					s.applySuggestionToInput()
+					return nil
+				case tcell.KeyDown:
+					s.suggestIndex = clampIndex(s.suggestIndex+1, len(s.suggestItems))
+					s.updateSuggestions()
+					s.applySuggestionToInput()
+					return nil
+				}
+			}
 			if event.Key() == tcell.KeyEsc {
 				s.mode = tuiModeNormal
 				s.inputView.SetText("")
 				s.inputView.SetLabel("")
+				s.clearSuggestions()
 				s.updateInputPlaceholder()
 				s.updateStatus()
 				s.setFocus("messages")
@@ -375,6 +402,7 @@ func (s *tuiState) wireKeys() {
 		s.mode = tuiModeNormal
 		s.inputView.SetText("")
 		s.inputView.SetLabel("")
+		s.clearSuggestions()
 		s.updateInputPlaceholder()
 		s.updateStatus()
 		s.setFocus("messages")
@@ -889,6 +917,7 @@ func (s *tuiState) applyInputStyle() {
 	s.inputView.SetFieldTextColor(tcell.NewRGBColor(214, 217, 220))
 	s.inputView.SetLabelColor(tcell.NewRGBColor(203, 168, 106))
 	s.inputView.SetPlaceholderTextColor(tcell.NewRGBColor(120, 130, 140))
+	s.suggestView.SetTextColor(tcell.NewRGBColor(160, 170, 180))
 	s.updateInputPlaceholder()
 }
 
@@ -1036,6 +1065,7 @@ func (s *tuiState) autocompleteFilePath() bool {
 		}
 	}
 	if len(matches) == 0 {
+		s.clearSuggestions()
 		return false
 	}
 	sort.Strings(matches)
@@ -1045,18 +1075,25 @@ func (s *tuiState) autocompleteFilePath() bool {
 			next += string(os.PathSeparator)
 		}
 		s.inputView.SetText(next)
+		s.clearSuggestions()
 		return true
 	}
-	prefix := commonPrefix(matches)
-	if len(prefix) > len(base) {
-		next := prefix
-		if dir != "." {
-			next = filepath.Join(dir, prefix)
-		}
-		s.inputView.SetText(next)
-		return true
+	key := fmt.Sprintf("%s|%s|%s", dir, base, strings.Join(matches, ","))
+	if key == s.suggestKey {
+		s.suggestIndex = (s.suggestIndex + 1) % len(matches)
+	} else {
+		s.suggestIndex = 0
 	}
-	s.flashStatus(fmt.Sprintf("%d matches", len(matches)))
+	s.suggestKey = key
+	s.suggestItems = matches
+	s.suggestActive = true
+	s.updateSuggestions()
+
+	next := filepath.Join(dir, matches[s.suggestIndex])
+	if info, err := os.Stat(next); err == nil && info.IsDir() {
+		next += string(os.PathSeparator)
+	}
+	s.inputView.SetText(next)
 	return true
 }
 
@@ -1090,6 +1127,72 @@ func commonPrefix(items []string) string {
 		}
 	}
 	return prefix
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func (s *tuiState) applySuggestionToInput() {
+	if !s.suggestActive || len(s.suggestItems) == 0 {
+		return
+	}
+	raw := s.inputView.GetText()
+	path, err := expandUserPath(raw)
+	if err != nil {
+		return
+	}
+	dir := path
+	if !strings.HasSuffix(path, string(os.PathSeparator)) {
+		dir = filepath.Dir(path)
+	}
+	if dir == "" {
+		dir = "."
+	}
+	next := filepath.Join(dir, s.suggestItems[s.suggestIndex])
+	if info, err := os.Stat(next); err == nil && info.IsDir() {
+		next += string(os.PathSeparator)
+	}
+	s.inputView.SetText(next)
+}
+
+func (s *tuiState) updateSuggestions() {
+	if s.suggestView == nil {
+		return
+	}
+	if !s.suggestActive || len(s.suggestItems) == 0 {
+		s.suggestView.SetText("")
+		return
+	}
+	var b strings.Builder
+	max := min(6, len(s.suggestItems))
+	start := 0
+	if s.suggestIndex >= max {
+		start = s.suggestIndex - max + 1
+	}
+	end := min(len(s.suggestItems), start+max)
+	for i := start; i < end; i++ {
+		item := s.suggestItems[i]
+		prefix := "  "
+		if i == s.suggestIndex {
+			prefix = "[#cba86a]»[-] "
+		}
+		fmt.Fprintf(&b, "%s%s\n", prefix, item)
+	}
+	s.suggestView.SetText(strings.TrimRight(b.String(), "\n"))
+}
+
+func (s *tuiState) clearSuggestions() {
+	s.suggestItems = nil
+	s.suggestIndex = 0
+	s.suggestKey = ""
+	s.suggestActive = false
+	if s.suggestView != nil {
+		s.suggestView.SetText("")
+	}
 }
 
 func (s *tuiState) setSyncStatus(status string) {
