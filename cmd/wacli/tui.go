@@ -9,6 +9,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/spf13/cobra"
+	appPkg "github.com/steipete/wacli/internal/app"
 	"github.com/steipete/wacli/internal/store"
 )
 
@@ -58,6 +59,7 @@ type tuiState struct {
 
 	refreshInterval time.Duration
 	skipChatChange  bool
+	syncStatus      string
 
 	chatsView    *tview.List
 	messagesView *tview.List
@@ -69,13 +71,20 @@ type tuiState struct {
 }
 
 func newTuiCmd(flags *rootFlags) *cobra.Command {
+	var noSync bool
+	var syncDownloadMedia bool
+	var syncRefreshContacts bool
+	var syncRefreshGroups bool
+
 	cmd := &cobra.Command{
 		Use:   "tui",
 		Short: "Read-only TUI (ranger-like layout)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := context.Background()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, false, true)
+			needLock := !noSync
+			a, lk, err := newApp(ctx, flags, needLock, true)
 			if err != nil {
 				return err
 			}
@@ -83,9 +92,40 @@ func newTuiCmd(flags *rootFlags) *cobra.Command {
 
 			state := newTuiState(flags)
 			state.setStore(a.DB())
-			return state.run()
+
+			if !noSync {
+				state.setSyncStatus("starting")
+				go func() {
+					if err := a.EnsureAuthed(); err != nil {
+						state.setSyncStatus("unauth (run wacli auth)")
+						return
+					}
+					state.setSyncStatus("running")
+					_, err := a.Sync(ctx, appPkg.SyncOptions{
+						Mode:            appPkg.SyncModeFollow,
+						AllowQR:         false,
+						DownloadMedia:   syncDownloadMedia,
+						RefreshContacts: syncRefreshContacts,
+						RefreshGroups:   syncRefreshGroups,
+					})
+					if err != nil {
+						state.setSyncStatus(fmt.Sprintf("error: %v", err))
+						return
+					}
+					state.setSyncStatus("stopped")
+				}()
+			}
+
+			err = state.run(ctx)
+			cancel()
+			return err
 		},
 	}
+
+	cmd.Flags().BoolVar(&noSync, "no-sync", false, "disable background sync")
+	cmd.Flags().BoolVar(&syncDownloadMedia, "sync-download-media", false, "download media in the background during sync")
+	cmd.Flags().BoolVar(&syncRefreshContacts, "sync-refresh-contacts", false, "refresh contacts from session store into local DB")
+	cmd.Flags().BoolVar(&syncRefreshGroups, "sync-refresh-groups", false, "refresh joined groups (live) into local DB")
 	return cmd
 }
 
@@ -155,9 +195,7 @@ func (s *tuiState) setStore(db *store.DB) {
 	}
 }
 
-func (s *tuiState) run() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func (s *tuiState) run(ctx context.Context) error {
 	s.setFocus("messages")
 	s.startRefreshLoop(ctx)
 	s.updateStatus()
@@ -766,7 +804,20 @@ func (s *tuiState) updateStatus() {
 	if s.mode == tuiModeMessageSearch && strings.TrimSpace(s.msgQuery) != "" {
 		status = fmt.Sprintf("%s | search: %s", status, truncate(s.msgQuery, 18))
 	}
+	if strings.TrimSpace(s.syncStatus) != "" {
+		status = fmt.Sprintf("%s | sync: %s", status, s.syncStatus)
+	}
 	s.statusView.SetText(status)
+}
+
+func (s *tuiState) setSyncStatus(status string) {
+	s.syncStatus = status
+	if s.app == nil {
+		return
+	}
+	s.app.QueueUpdateDraw(func() {
+		s.updateStatus()
+	})
 }
 
 func padLeft(s string, width int) string {
