@@ -119,6 +119,15 @@ func (d *DB) CountMessages() (int64, error) {
 	return n, nil
 }
 
+func (d *DB) CountMessagesAfter(chatJID string, after time.Time) (int, error) {
+	row := d.sql.QueryRow(`SELECT COUNT(1) FROM messages WHERE chat_jid = ? AND ts > ?`, chatJID, unix(after))
+	var n int
+	if err := row.Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 func (d *DB) GetOldestMessageInfo(chatJID string) (MessageInfo, error) {
 	chatJID = strings.TrimSpace(chatJID)
 	if chatJID == "" {
