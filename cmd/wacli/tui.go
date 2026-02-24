@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -11,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	appPkg "github.com/steipete/wacli/internal/app"
 	"github.com/steipete/wacli/internal/store"
+	"go.mau.fi/whatsmeow/types"
 )
 
 type tuiMode int
@@ -19,6 +23,8 @@ const (
 	tuiModeNormal tuiMode = iota
 	tuiModeChatFilter
 	tuiModeMessageSearch
+	tuiModeSendText
+	tuiModeSendFile
 )
 
 const (
@@ -42,6 +48,7 @@ type tuiState struct {
 	mode  tuiMode
 
 	db *store.DB
+	wa *appPkg.App
 
 	chatFilter string
 	msgQuery   string
@@ -70,6 +77,7 @@ type tuiState struct {
 	statusView   *tview.TextView
 
 	focusedPane string
+	statusNote  string
 }
 
 func newTuiCmd(flags *rootFlags) *cobra.Command {
@@ -93,6 +101,7 @@ func newTuiCmd(flags *rootFlags) *cobra.Command {
 			defer closeApp(a, lk)
 
 			state := newTuiState(flags)
+			state.setApp(a)
 			state.setStore(a.DB())
 
 			if !noSync {
@@ -183,7 +192,7 @@ func newTuiState(flags *rootFlags) *tuiState {
 	inputBox := tview.NewFlex().SetDirection(tview.FlexRow)
 	inputBox.AddItem(input, 1, 0, false)
 	inputBox.AddItem(status, 1, 0, false)
-	inputBox.SetBorder(true).SetTitle("Input")
+	inputBox.SetBorder(true).SetTitle("Send").SetTitleAlign(tview.AlignLeft)
 
 	center.AddItem(inputBox, 3, 0, false)
 
@@ -207,6 +216,10 @@ func (s *tuiState) setStore(db *store.DB) {
 	}
 }
 
+func (s *tuiState) setApp(app *appPkg.App) {
+	s.wa = app
+}
+
 func (s *tuiState) run(ctx context.Context) error {
 	s.setFocus("messages")
 	s.appRunning = true
@@ -216,6 +229,8 @@ func (s *tuiState) run(ctx context.Context) error {
 }
 
 func (s *tuiState) wireKeys() {
+	s.applyInputStyle()
+
 	s.chatsView.SetChangedFunc(func(i int, main, secondary string, shortcut rune) {
 		if s.skipChatChange {
 			return
@@ -247,10 +262,16 @@ func (s *tuiState) wireKeys() {
 
 	s.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if s.app.GetFocus() == s.inputView {
+			if event.Key() == tcell.KeyTab && s.mode == tuiModeSendFile {
+				if s.autocompleteFilePath() {
+					return nil
+				}
+			}
 			if event.Key() == tcell.KeyEsc {
 				s.mode = tuiModeNormal
 				s.inputView.SetText("")
 				s.inputView.SetLabel("")
+				s.updateInputPlaceholder()
 				s.updateStatus()
 				s.setFocus("messages")
 				return nil
@@ -272,6 +293,24 @@ func (s *tuiState) wireKeys() {
 		case 'q':
 			s.app.Stop()
 			return nil
+		case 'i':
+			if s.app.GetFocus() == s.messagesView {
+				s.mode = tuiModeSendText
+				s.inputView.SetLabel("msg: ")
+				s.inputView.SetText("")
+				s.updateInputPlaceholder()
+				s.setFocus("input")
+				return nil
+			}
+		case 'f':
+			if s.app.GetFocus() == s.messagesView {
+				s.mode = tuiModeSendFile
+				s.inputView.SetLabel("file: ")
+				s.inputView.SetText("")
+				s.updateInputPlaceholder()
+				s.setFocus("input")
+				return nil
+			}
 		case 'h':
 			s.setFocus("chats")
 			return nil
@@ -318,10 +357,25 @@ func (s *tuiState) wireKeys() {
 		case tuiModeMessageSearch:
 			s.msgQuery = text
 			s.reloadMessages(false)
+		case tuiModeSendText:
+			if err := s.sendTextMessage(text); err != nil {
+				s.flashStatus(fmt.Sprintf("send failed: %v", err))
+			} else {
+				s.flashStatus("message sent")
+			}
+			s.reloadMessages(true)
+		case tuiModeSendFile:
+			if err := s.sendFileMessage(text); err != nil {
+				s.flashStatus(fmt.Sprintf("send failed: %v", err))
+			} else {
+				s.flashStatus("file sent")
+			}
+			s.reloadMessages(true)
 		}
 		s.mode = tuiModeNormal
 		s.inputView.SetText("")
 		s.inputView.SetLabel("")
+		s.updateInputPlaceholder()
 		s.updateStatus()
 		s.setFocus("messages")
 	})
@@ -812,6 +866,10 @@ func (s *tuiState) updateStatus() {
 		mode = "filter"
 	case tuiModeMessageSearch:
 		mode = "search"
+	case tuiModeSendText:
+		mode = "send"
+	case tuiModeSendFile:
+		mode = "file"
 	}
 	status := fmt.Sprintf("chat: %s | msgs: %d | mode: %s", truncate(chatLabel, 24), len(s.messages), mode)
 	if s.mode == tuiModeChatFilter && strings.TrimSpace(s.chatFilter) != "" {
@@ -820,7 +878,218 @@ func (s *tuiState) updateStatus() {
 	if s.mode == tuiModeMessageSearch && strings.TrimSpace(s.msgQuery) != "" {
 		status = fmt.Sprintf("%s | search: %s", status, truncate(s.msgQuery, 18))
 	}
+	if strings.TrimSpace(s.statusNote) != "" {
+		status = fmt.Sprintf("%s | %s", status, truncate(s.statusNote, 40))
+	}
 	s.statusView.SetText(status)
+}
+
+func (s *tuiState) applyInputStyle() {
+	s.inputView.SetFieldBackgroundColor(tcell.NewRGBColor(24, 26, 29))
+	s.inputView.SetFieldTextColor(tcell.NewRGBColor(214, 217, 220))
+	s.inputView.SetLabelColor(tcell.NewRGBColor(203, 168, 106))
+	s.inputView.SetPlaceholderTextColor(tcell.NewRGBColor(120, 130, 140))
+	s.updateInputPlaceholder()
+}
+
+func (s *tuiState) updateInputPlaceholder() {
+	switch s.mode {
+	case tuiModeSendText:
+		s.inputView.SetPlaceholder("Type message and press Enter")
+	case tuiModeSendFile:
+		s.inputView.SetPlaceholder("Path to file (TAB to autocomplete)")
+	default:
+		s.inputView.SetPlaceholder("i: text, f: file")
+	}
+}
+
+func (s *tuiState) flashStatus(msg string) {
+	s.statusNote = msg
+	s.updateStatus()
+	time.AfterFunc(3*time.Second, func() {
+		s.app.QueueUpdateDraw(func() {
+			if s.statusNote == msg {
+				s.statusNote = ""
+				s.updateStatus()
+			}
+		})
+	})
+}
+
+func (s *tuiState) sendTextMessage(text string) error {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return fmt.Errorf("message is empty")
+	}
+	if s.wa == nil {
+		return fmt.Errorf("app not ready")
+	}
+	if strings.TrimSpace(s.selectedChatJID) == "" {
+		return fmt.Errorf("no chat selected")
+	}
+	jid, err := types.ParseJID(s.selectedChatJID)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := withTimeout(context.Background(), s.flags)
+	defer cancel()
+
+	if err := s.wa.EnsureAuthed(); err != nil {
+		return err
+	}
+	if !s.wa.WA().IsConnected() {
+		if err := s.wa.Connect(ctx, false, nil); err != nil {
+			return err
+		}
+	}
+	msgID, err := s.wa.WA().SendText(ctx, jid, text)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	chatName := s.wa.WA().ResolveChatName(ctx, jid, "")
+	kind := chatKindFromJID(jid)
+	_ = s.wa.DB().UpsertChat(jid.String(), kind, chatName, now)
+	_ = s.wa.DB().UpsertMessage(store.UpsertMessageParams{
+		ChatJID:    jid.String(),
+		ChatName:   chatName,
+		MsgID:      string(msgID),
+		SenderJID:  "",
+		SenderName: "me",
+		Timestamp:  now,
+		FromMe:     true,
+		Text:       text,
+	})
+	return nil
+}
+
+func (s *tuiState) sendFileMessage(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("file path is empty")
+	}
+	if s.wa == nil {
+		return fmt.Errorf("app not ready")
+	}
+	if strings.TrimSpace(s.selectedChatJID) == "" {
+		return fmt.Errorf("no chat selected")
+	}
+	fullPath, err := expandUserPath(path)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("path is a directory")
+	}
+	jid, err := types.ParseJID(s.selectedChatJID)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := withTimeout(context.Background(), s.flags)
+	defer cancel()
+	if err := s.wa.EnsureAuthed(); err != nil {
+		return err
+	}
+	if !s.wa.WA().IsConnected() {
+		if err := s.wa.Connect(ctx, false, nil); err != nil {
+			return err
+		}
+	}
+	_, _, err = sendFile(ctx, s.wa, jid, fullPath, "", "", "")
+	return err
+}
+
+func (s *tuiState) autocompleteFilePath() bool {
+	raw := s.inputView.GetText()
+	if raw == "" {
+		s.inputView.SetText("./")
+		return true
+	}
+	path, err := expandUserPath(raw)
+	if err != nil {
+		return false
+	}
+	dir := path
+	base := ""
+	if !strings.HasSuffix(path, string(os.PathSeparator)) {
+		dir = filepath.Dir(path)
+		base = filepath.Base(path)
+	}
+	if dir == "" {
+		dir = "."
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	var matches []string
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, base) {
+			matches = append(matches, name)
+		}
+	}
+	if len(matches) == 0 {
+		return false
+	}
+	sort.Strings(matches)
+	if len(matches) == 1 {
+		next := filepath.Join(dir, matches[0])
+		if info, err := os.Stat(next); err == nil && info.IsDir() {
+			next += string(os.PathSeparator)
+		}
+		s.inputView.SetText(next)
+		return true
+	}
+	prefix := commonPrefix(matches)
+	if len(prefix) > len(base) {
+		next := prefix
+		if dir != "." {
+			next = filepath.Join(dir, prefix)
+		}
+		s.inputView.SetText(next)
+		return true
+	}
+	s.flashStatus(fmt.Sprintf("%d matches", len(matches)))
+	return true
+}
+
+func expandUserPath(p string) (string, error) {
+	if strings.HasPrefix(p, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		if p == "~" {
+			return home, nil
+		}
+		if strings.HasPrefix(p, "~/") {
+			return filepath.Join(home, p[2:]), nil
+		}
+	}
+	return p, nil
+}
+
+func commonPrefix(items []string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	prefix := items[0]
+	for _, s := range items[1:] {
+		for !strings.HasPrefix(s, prefix) && prefix != "" {
+			prefix = prefix[:len(prefix)-1]
+		}
+		if prefix == "" {
+			return ""
+		}
+	}
+	return prefix
 }
 
 func (s *tuiState) setSyncStatus(status string) {
