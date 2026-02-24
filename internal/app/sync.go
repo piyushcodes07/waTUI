@@ -227,9 +227,6 @@ func normalizeChatJID(chat types.JID) types.JID {
 	if chat.Server == types.GroupServer || chat.IsBroadcastList() {
 		return chat
 	}
-	if chat.Server == "lid" {
-		return types.JID{User: chat.User, Server: types.DefaultUserServer}
-	}
 	return chat.ToNonAD()
 }
 
@@ -237,11 +234,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 	chat := normalizeChatJID(pm.Chat)
 	if pm.SenderJID != "" {
 		if jid, err := types.ParseJID(pm.SenderJID); err == nil {
-			if jid.Server == "lid" {
-				jid = types.JID{User: jid.User, Server: types.DefaultUserServer}
-			} else {
-				jid = jid.ToNonAD()
-			}
+			jid = jid.ToNonAD()
 			pm.SenderJID = jid.String()
 		}
 	}
