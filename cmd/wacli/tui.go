@@ -65,6 +65,7 @@ type tuiState struct {
 	chatsView    *tview.List
 	messagesView *tview.List
 	rightView    *tview.TextView
+	syncView     *tview.TextView
 	inputView    *tview.InputField
 	statusView   *tview.TextView
 
@@ -145,6 +146,10 @@ func newTuiState(flags *rootFlags) *tuiState {
 	right := tview.NewTextView().SetDynamicColors(true)
 	right.SetBorder(true).SetTitle("Info")
 
+	syncView := tview.NewTextView().SetDynamicColors(true)
+	syncView.SetBorder(true).SetTitle("Sync")
+	syncView.SetTextAlign(tview.AlignCenter)
+
 	input := tview.NewInputField()
 	input.SetFieldWidth(0)
 
@@ -158,6 +163,7 @@ func newTuiState(flags *rootFlags) *tuiState {
 		chatsView:          chats,
 		messagesView:       messages,
 		rightView:          right,
+		syncView:           syncView,
 		inputView:          input,
 		statusView:         status,
 		lastSeenChatTS:     map[string]time.Time{},
@@ -180,10 +186,14 @@ func newTuiState(flags *rootFlags) *tuiState {
 
 	center.AddItem(inputBox, 3, 0, false)
 
+	rightCol := tview.NewFlex().SetDirection(tview.FlexRow)
+	rightCol.AddItem(syncView, 3, 0, false)
+	rightCol.AddItem(right, 0, 1, false)
+
 	root := tview.NewFlex().
 		AddItem(chats, 0, 1, true).
 		AddItem(center, 0, 2, true).
-		AddItem(right, 0, 1, false)
+		AddItem(rightCol, 0, 1, false)
 
 	app.SetRoot(root, true)
 	return state
@@ -595,18 +605,17 @@ func (s *tuiState) maybeReloadMessages(chat store.Chat) {
 func (s *tuiState) updateRightPane() {
 	if s.db == nil || s.selectedChatJID == "" {
 		s.rightView.SetText("")
+		s.updateSyncPane()
 		return
 	}
 	chat, err := s.db.GetChat(s.selectedChatJID)
 	if err != nil {
 		s.rightView.SetText(fmt.Sprintf("error: %v", err))
+		s.updateSyncPane()
 		return
 	}
-	_, _, width, _ := s.rightView.GetInnerRect()
 	s.rightView.Clear()
-	if line := s.syncIndicatorLine(width); line != "" {
-		fmt.Fprintf(s.rightView, "%s\n", line)
-	}
+	s.updateSyncPane()
 	name := chat.Name
 	if strings.TrimSpace(name) == "" {
 		name = chat.JID
@@ -819,12 +828,12 @@ func (s *tuiState) setSyncStatus(status string) {
 		return
 	}
 	s.app.QueueUpdateDraw(func() {
-		s.updateRightPane()
+		s.updateSyncPane()
 		s.updateStatus()
 	})
 }
 
-func (s *tuiState) syncIndicatorLine(width int) string {
+func (s *tuiState) syncIndicatorLine() string {
 	status := strings.TrimSpace(s.syncStatus)
 	if status == "" {
 		return ""
@@ -837,41 +846,19 @@ func (s *tuiState) syncIndicatorLine(width int) string {
 	case strings.Contains(lower, "unauth"), strings.Contains(lower, "error"), strings.Contains(lower, "stopped"):
 		dot = "[red]●[-]"
 	}
-	line := fmt.Sprintf("Sync: %s %s", dot, status)
-	return rightAlign(line, width)
+	return fmt.Sprintf("%s %s", dot, status)
 }
 
-func rightAlign(line string, width int) string {
-	if width <= 0 {
-		return line
+func (s *tuiState) updateSyncPane() {
+	if s.syncView == nil {
+		return
 	}
-	plain := stripColors(line)
-	if len(plain) >= width {
-		return line
+	line := s.syncIndicatorLine()
+	if line == "" {
+		s.syncView.SetText("[red]●[-] off")
+		return
 	}
-	return strings.Repeat(" ", width-len(plain)) + line
-}
-
-func stripColors(s string) string {
-	var b strings.Builder
-	inTag := false
-	for _, r := range s {
-		switch r {
-		case '[':
-			inTag = true
-		case ']':
-			if inTag {
-				inTag = false
-			} else {
-				b.WriteRune(r)
-			}
-		default:
-			if !inTag {
-				b.WriteRune(r)
-			}
-		}
-	}
-	return b.String()
+	s.syncView.SetText(line)
 }
 
 func padLeft(s string, width int) string {
