@@ -602,7 +602,11 @@ func (s *tuiState) updateRightPane() {
 		s.rightView.SetText(fmt.Sprintf("error: %v", err))
 		return
 	}
+	_, _, width, _ := s.rightView.GetInnerRect()
 	s.rightView.Clear()
+	if line := s.syncIndicatorLine(width); line != "" {
+		fmt.Fprintf(s.rightView, "%s\n", line)
+	}
 	name := chat.Name
 	if strings.TrimSpace(name) == "" {
 		name = chat.JID
@@ -806,9 +810,6 @@ func (s *tuiState) updateStatus() {
 	if s.mode == tuiModeMessageSearch && strings.TrimSpace(s.msgQuery) != "" {
 		status = fmt.Sprintf("%s | search: %s", status, truncate(s.msgQuery, 18))
 	}
-	if strings.TrimSpace(s.syncStatus) != "" {
-		status = fmt.Sprintf("%s | sync: %s", status, s.syncStatus)
-	}
 	s.statusView.SetText(status)
 }
 
@@ -818,8 +819,59 @@ func (s *tuiState) setSyncStatus(status string) {
 		return
 	}
 	s.app.QueueUpdateDraw(func() {
+		s.updateRightPane()
 		s.updateStatus()
 	})
+}
+
+func (s *tuiState) syncIndicatorLine(width int) string {
+	status := strings.TrimSpace(s.syncStatus)
+	if status == "" {
+		return ""
+	}
+	dot := "[yellow]●[-]"
+	lower := strings.ToLower(status)
+	switch {
+	case strings.Contains(lower, "running"):
+		dot = "[green]●[-]"
+	case strings.Contains(lower, "unauth"), strings.Contains(lower, "error"), strings.Contains(lower, "stopped"):
+		dot = "[red]●[-]"
+	}
+	line := fmt.Sprintf("Sync: %s %s", dot, status)
+	return rightAlign(line, width)
+}
+
+func rightAlign(line string, width int) string {
+	if width <= 0 {
+		return line
+	}
+	plain := stripColors(line)
+	if len(plain) >= width {
+		return line
+	}
+	return strings.Repeat(" ", width-len(plain)) + line
+}
+
+func stripColors(s string) string {
+	var b strings.Builder
+	inTag := false
+	for _, r := range s {
+		switch r {
+		case '[':
+			inTag = true
+		case ']':
+			if inTag {
+				inTag = false
+			} else {
+				b.WriteRune(r)
+			}
+		default:
+			if !inTag {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
 }
 
 func padLeft(s string, width int) string {
