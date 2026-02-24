@@ -60,6 +60,7 @@ type tuiState struct {
 	refreshInterval time.Duration
 	skipChatChange  bool
 	syncStatus      string
+	appRunning      bool
 
 	chatsView    *tview.List
 	messagesView *tview.List
@@ -197,6 +198,7 @@ func (s *tuiState) setStore(db *store.DB) {
 
 func (s *tuiState) run(ctx context.Context) error {
 	s.setFocus("messages")
+	s.appRunning = true
 	s.startRefreshLoop(ctx)
 	s.updateStatus()
 	return s.app.Run()
@@ -812,7 +814,7 @@ func (s *tuiState) updateStatus() {
 
 func (s *tuiState) setSyncStatus(status string) {
 	s.syncStatus = status
-	if s.app == nil {
+	if s.app == nil || !s.appRunning {
 		return
 	}
 	s.app.QueueUpdateDraw(func() {
