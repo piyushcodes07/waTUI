@@ -165,6 +165,7 @@ func newTuiState(flags *rootFlags) *tuiState {
 
 	messages := tview.NewList().ShowSecondaryText(false)
 	messages.SetBorder(true).SetTitle("Messages")
+	messages.SetTitleAlign(tview.AlignLeft)
 
 	right := tview.NewTextView().SetDynamicColors(true)
 	right.SetBorder(true).SetTitle("Info")
@@ -293,7 +294,21 @@ func (s *tuiState) wireKeys() {
 
 	s.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if s.app.GetFocus() == s.searchView {
-			if event.Key() == tcell.KeyEsc {
+			switch event.Key() {
+			case tcell.KeyEnter:
+				idx := s.chatsView.GetCurrentItem()
+				if idx >= 0 && idx < len(s.chats) {
+					s.selectChat(s.chats[idx].JID)
+				}
+				s.setFocus("messages")
+				return nil
+			case tcell.KeyUp:
+				s.moveSelection(-1)
+				return nil
+			case tcell.KeyDown:
+				s.moveSelection(1)
+				return nil
+			case tcell.KeyEsc:
 				s.searchView.SetText("")
 				s.chatFilter = ""
 				s.mode = tuiModeNormal
@@ -598,6 +613,7 @@ func (s *tuiState) loadChats(preserveSelection bool) {
 		s.maybeReloadMessages(filtered[selectedIdx])
 	}
 	s.detectNotifications(filtered)
+	s.updateMessagesTitle()
 	s.updateRightPane()
 	s.updateStatus()
 }
@@ -607,6 +623,7 @@ func (s *tuiState) selectChat(jid string) {
 		return
 	}
 	s.selectedChatJID = jid
+	s.updateMessagesTitle()
 	s.reloadMessages(false)
 	s.updateRightPane()
 }
@@ -764,6 +781,27 @@ func (s *tuiState) updateRightPane() {
 			fmt.Fprintf(s.rightView, "%s\n", line)
 		}
 	}
+}
+
+func (s *tuiState) updateMessagesTitle() {
+	if s.messagesView == nil {
+		return
+	}
+	title := "Message"
+	if strings.TrimSpace(s.selectedChatJID) != "" {
+		for _, c := range s.chats {
+			if c.JID == s.selectedChatJID {
+				name := strings.TrimSpace(c.Name)
+				if name == "" {
+					name = c.JID
+				}
+				title = fmt.Sprintf("Message - %s", truncate(name, 28))
+				break
+			}
+		}
+	}
+	s.messagesView.SetTitle(title)
+	s.messagesView.SetTitleAlign(tview.AlignLeft)
 }
 
 func (s *tuiState) detectNotifications(chats []store.Chat) {
@@ -987,11 +1025,10 @@ func (s *tuiState) updateKeyBindings() {
 		"[#cba86a]f[-]  send file",
 		"[#cba86a]/[-]  search chats",
 		"[#cba86a]?[-]  search messages",
+		"[#cba86a]↑/↓[-] navigate (search/suggest)",
 		"[#cba86a]Tab[-] autocomplete file path",
-		"[#cba86a]↑/↓[-] select file suggestion",
-		"[#cba86a]h[-]  focus chats",
-		"[#cba86a]l[-]  focus messages",
-		"[#cba86a]j/k[-] move selection",
+		"[#cba86a]j/k[-] up/down",
+		"[#cba86a]h/l[-] left/right",
 		"[#cba86a]g/G[-] top/bottom",
 		"[#cba86a]Esc[-] cancel input",
 		"[#cba86a]q[-]  quit",
