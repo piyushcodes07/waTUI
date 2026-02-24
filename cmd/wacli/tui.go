@@ -236,7 +236,7 @@ func newTuiState(flags *rootFlags) *tuiState {
 	rightCol := tview.NewFlex().SetDirection(tview.FlexRow)
 	rightCol.AddItem(syncView, 3, 0, false)
 	rightCol.AddItem(right, 0, 1, false)
-	rightCol.AddItem(keysView, 9, 0, false)
+	rightCol.AddItem(keysView, 11, 0, false)
 
 	root := tview.NewFlex().
 		AddItem(leftCol, 0, 1, true).
