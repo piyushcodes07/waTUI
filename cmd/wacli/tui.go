@@ -70,9 +70,11 @@ type tuiState struct {
 	appRunning      bool
 
 	chatsView    *tview.List
+	searchView   *tview.InputField
 	messagesView *tview.List
 	rightView    *tview.TextView
 	syncView     *tview.TextView
+	keysView     *tview.TextView
 	inputView    *tview.InputField
 	suggestView  *tview.TextView
 	statusView   *tview.TextView
@@ -156,6 +158,11 @@ func newTuiState(flags *rootFlags) *tuiState {
 	chats.SetBorder(true).SetTitle("whatsTUI")
 	chats.SetTitleAlign(tview.AlignLeft)
 
+	search := tview.NewInputField()
+	search.SetFieldWidth(0)
+	search.SetPlaceholder("Search chats (/)")
+	search.SetBorder(true).SetTitle("Search").SetTitleAlign(tview.AlignLeft)
+
 	messages := tview.NewList().ShowSecondaryText(false)
 	messages.SetBorder(true).SetTitle("Messages")
 
@@ -165,6 +172,9 @@ func newTuiState(flags *rootFlags) *tuiState {
 	syncView := tview.NewTextView().SetDynamicColors(true)
 	syncView.SetBorder(true).SetTitle("Sync")
 	syncView.SetTextAlign(tview.AlignCenter)
+
+	keysView := tview.NewTextView().SetDynamicColors(true)
+	keysView.SetBorder(true).SetTitle("KEY-BINDINGS").SetTitleAlign(tview.AlignLeft)
 
 	input := tview.NewInputField()
 	input.SetFieldWidth(0)
@@ -181,9 +191,11 @@ func newTuiState(flags *rootFlags) *tuiState {
 		flags:              flags,
 		mode:               tuiModeNormal,
 		chatsView:          chats,
+		searchView:         search,
 		messagesView:       messages,
 		rightView:          right,
 		syncView:           syncView,
+		keysView:           keysView,
 		inputView:          input,
 		suggestView:        suggest,
 		statusView:         status,
@@ -208,12 +220,17 @@ func newTuiState(flags *rootFlags) *tuiState {
 
 	center.AddItem(inputBox, 3, 0, false)
 
+	leftCol := tview.NewFlex().SetDirection(tview.FlexRow)
+	leftCol.AddItem(search, 3, 0, false)
+	leftCol.AddItem(chats, 0, 1, true)
+
 	rightCol := tview.NewFlex().SetDirection(tview.FlexRow)
 	rightCol.AddItem(syncView, 3, 0, false)
 	rightCol.AddItem(right, 0, 1, false)
+	rightCol.AddItem(keysView, 7, 0, false)
 
 	root := tview.NewFlex().
-		AddItem(chats, 0, 1, true).
+		AddItem(leftCol, 0, 1, true).
 		AddItem(center, 0, 2, true).
 		AddItem(rightCol, 0, 1, false)
 
@@ -242,6 +259,8 @@ func (s *tuiState) run(ctx context.Context) error {
 
 func (s *tuiState) wireKeys() {
 	s.applyInputStyle()
+	s.applySearchStyle()
+	s.updateKeyBindings()
 
 	s.chatsView.SetChangedFunc(func(i int, main, secondary string, shortcut rune) {
 		if s.skipChatChange {
@@ -273,6 +292,18 @@ func (s *tuiState) wireKeys() {
 	})
 
 	s.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if s.app.GetFocus() == s.searchView {
+			if event.Key() == tcell.KeyEsc {
+				s.searchView.SetText("")
+				s.chatFilter = ""
+				s.mode = tuiModeNormal
+				s.reloadChats()
+				s.updateStatus()
+				s.setFocus("messages")
+				return nil
+			}
+			return event
+		}
 		if s.app.GetFocus() == s.inputView {
 			if event.Key() == tcell.KeyTab && s.mode == tuiModeSendFile {
 				if s.autocompleteFilePath() {
@@ -320,6 +351,10 @@ func (s *tuiState) wireKeys() {
 		case 'q':
 			s.app.Stop()
 			return nil
+		case '/':
+			s.mode = tuiModeChatFilter
+			s.setFocus("search")
+			return nil
 		case 'i':
 			if s.app.GetFocus() == s.messagesView {
 				s.mode = tuiModeSendText
@@ -356,20 +391,24 @@ func (s *tuiState) wireKeys() {
 		case 'G':
 			s.jumpBottom()
 			return nil
-		case '/':
+		case '?':
 			s.mode = tuiModeMessageSearch
 			s.inputView.SetLabel("search: ")
 			s.inputView.SetText("")
-			s.setFocus("input")
-			return nil
-		case '?':
-			s.mode = tuiModeChatFilter
-			s.inputView.SetLabel("filter: ")
-			s.inputView.SetText("")
+			s.updateInputPlaceholder()
 			s.setFocus("input")
 			return nil
 		}
 		return event
+	})
+
+	s.searchView.SetChangedFunc(func(text string) {
+		if s.mode != tuiModeChatFilter {
+			return
+		}
+		s.chatFilter = strings.TrimSpace(text)
+		s.reloadChats()
+		s.updateStatus()
 	})
 
 	s.inputView.SetDoneFunc(func(key tcell.Key) {
@@ -378,9 +417,6 @@ func (s *tuiState) wireKeys() {
 		}
 		text := strings.TrimSpace(s.inputView.GetText())
 		switch s.mode {
-		case tuiModeChatFilter:
-			s.chatFilter = text
-			s.reloadChats()
 		case tuiModeMessageSearch:
 			s.msgQuery = text
 			s.reloadMessages(false)
@@ -832,6 +868,8 @@ func (s *tuiState) setFocus(pane string) {
 		s.app.SetFocus(s.messagesView)
 	case "input":
 		s.app.SetFocus(s.inputView)
+	case "search":
+		s.app.SetFocus(s.searchView)
 	case "right":
 		s.app.SetFocus(s.rightView)
 	}
@@ -930,6 +968,35 @@ func (s *tuiState) updateInputPlaceholder() {
 	default:
 		s.inputView.SetPlaceholder("i: text, f: file")
 	}
+}
+
+func (s *tuiState) applySearchStyle() {
+	s.searchView.SetFieldBackgroundColor(tcell.NewRGBColor(24, 26, 29))
+	s.searchView.SetFieldTextColor(tcell.NewRGBColor(214, 217, 220))
+	s.searchView.SetLabelColor(tcell.NewRGBColor(0, 200, 255))
+	s.searchView.SetPlaceholderTextColor(tcell.NewRGBColor(120, 130, 140))
+}
+
+func (s *tuiState) updateKeyBindings() {
+	if s.keysView == nil {
+		return
+	}
+	s.keysView.SetTitleColor(tcell.NewRGBColor(0, 200, 255))
+	lines := []string{
+		"[#cba86a]i[-]  send text",
+		"[#cba86a]f[-]  send file",
+		"[#cba86a]/[-]  search chats",
+		"[#cba86a]?[-]  search messages",
+		"[#cba86a]Tab[-] autocomplete file path",
+		"[#cba86a]↑/↓[-] select file suggestion",
+		"[#cba86a]h[-]  focus chats",
+		"[#cba86a]l[-]  focus messages",
+		"[#cba86a]j/k[-] move selection",
+		"[#cba86a]g/G[-] top/bottom",
+		"[#cba86a]Esc[-] cancel input",
+		"[#cba86a]q[-]  quit",
+	}
+	s.keysView.SetText(strings.Join(lines, "\n"))
 }
 
 func (s *tuiState) flashStatus(msg string) {
