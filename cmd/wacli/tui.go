@@ -109,6 +109,7 @@ func newTuiCmd(flags *rootFlags) *cobra.Command {
 						DownloadMedia:   syncDownloadMedia,
 						RefreshContacts: syncRefreshContacts,
 						RefreshGroups:   syncRefreshGroups,
+						Quiet:           true,
 					})
 					if err != nil {
 						state.setSyncStatus(fmt.Sprintf("error: %v", err))

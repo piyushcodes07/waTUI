@@ -32,6 +32,7 @@ type SyncOptions struct {
 	RefreshGroups   bool
 	IdleExit        time.Duration // only used for bootstrap/once
 	Verbosity       int           // future
+	Quiet           bool
 }
 
 type SyncResult struct {
@@ -48,6 +49,13 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 
 	if err := a.OpenWA(); err != nil {
 		return SyncResult{}, err
+	}
+
+	logf := func(format string, args ...any) {
+		if opts.Quiet {
+			return
+		}
+		fmt.Fprintf(os.Stderr, format, args...)
 	}
 
 	var messagesStored atomic.Int64
@@ -102,10 +110,10 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 				enqueueMedia(pm.Chat.String(), pm.ID)
 			}
 			if messagesStored.Load()%25 == 0 {
-				fmt.Fprintf(os.Stderr, "\rSynced %d messages...", messagesStored.Load())
+				logf("\rSynced %d messages...", messagesStored.Load())
 			}
 		case *events.HistorySync:
-			fmt.Fprintf(os.Stderr, "\nProcessing history sync (%d conversations)...\n", len(v.Data.Conversations))
+			logf("\nProcessing history sync (%d conversations)...\n", len(v.Data.Conversations))
 			for _, conv := range v.Data.Conversations {
 				lastEvent.Store(time.Now().UTC().UnixNano())
 				chatID := strings.TrimSpace(conv.GetID())
@@ -129,11 +137,11 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 					}
 				}
 			}
-			fmt.Fprintf(os.Stderr, "\rSynced %d messages...", messagesStored.Load())
+			logf("\rSynced %d messages...", messagesStored.Load())
 		case *events.Connected:
-			fmt.Fprintln(os.Stderr, "\nConnected.")
+			logf("\nConnected.\n")
 		case *events.Disconnected:
-			fmt.Fprintln(os.Stderr, "\nDisconnected.")
+			logf("\nDisconnected.\n")
 			select {
 			case disconnected <- struct{}{}:
 			default:
@@ -172,10 +180,10 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		for {
 			select {
 			case <-ctx.Done():
-				fmt.Fprintln(os.Stderr, "\nStopping sync.")
+				logf("\nStopping sync.\n")
 				return SyncResult{MessagesStored: messagesStored.Load()}, nil
 			case <-disconnected:
-				fmt.Fprintln(os.Stderr, "Reconnecting...")
+				logf("Reconnecting...\n")
 				if err := a.wa.ReconnectWithBackoff(ctx, 2*time.Second, 30*time.Second); err != nil {
 					return SyncResult{MessagesStored: messagesStored.Load()}, err
 				}
@@ -193,17 +201,17 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Fprintln(os.Stderr, "\nStopping sync.")
+			logf("\nStopping sync.\n")
 			return SyncResult{MessagesStored: messagesStored.Load()}, nil
 		case <-disconnected:
-			fmt.Fprintln(os.Stderr, "Reconnecting...")
+			logf("Reconnecting...\n")
 			if err := a.wa.ReconnectWithBackoff(ctx, 2*time.Second, 30*time.Second); err != nil {
 				return SyncResult{MessagesStored: messagesStored.Load()}, err
 			}
 		case <-ticker.C:
 			last := time.Unix(0, lastEvent.Load())
 			if time.Since(last) >= opts.IdleExit {
-				fmt.Fprintf(os.Stderr, "\nIdle for %s, exiting.\n", opts.IdleExit)
+				logf("\nIdle for %s, exiting.\n", opts.IdleExit)
 				return SyncResult{MessagesStored: messagesStored.Load()}, nil
 			}
 		}
