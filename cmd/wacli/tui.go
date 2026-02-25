@@ -964,12 +964,17 @@ func (s *tuiState) previewSelectedImage() error {
 		return err
 	}
 
-	return s.app.Suspend(func() {
-		_ = termimg.Open(path).Scale(termimg.ScaleFit).Print()
+	img, err := termimg.Open(path)
+	if err != nil {
+		return err
+	}
+	_ = s.app.Suspend(func() {
+		_ = img.Scale(termimg.ScaleFit).Print()
 		fmt.Fprint(os.Stdout, "\nPress Enter to return...")
 		_, _ = bufio.NewReader(os.Stdin).ReadBytes('\n')
 		fmt.Fprint(os.Stdout, "\n")
 	})
+	return nil
 }
 
 func (s *tuiState) downloadImage(ctx context.Context, msg store.Message) (string, error) {
