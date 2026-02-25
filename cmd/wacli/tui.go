@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blacktop/go-termimg"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/spf13/cobra"
@@ -53,8 +55,9 @@ type tuiState struct {
 	chatFilter string
 	msgQuery   string
 
-	chats    []store.Chat
-	messages []store.Message
+	chats           []store.Chat
+	messages        []store.Message
+	messageRowIndex []int
 
 	selectedChatJID string
 	selectedMsgIdx  int
@@ -374,6 +377,13 @@ func (s *tuiState) wireKeys() {
 		case 'q':
 			s.app.Stop()
 			return nil
+		case 'p':
+			if s.app.GetFocus() == s.messagesView {
+				if err := s.previewSelectedImage(); err != nil {
+					s.flashStatus(fmt.Sprintf("preview failed: %v", err))
+				}
+				return nil
+			}
 		case '/':
 			s.mode = tuiModeChatFilter
 			s.setFocus("search")
@@ -699,11 +709,12 @@ func (s *tuiState) reloadMessages(keepSelection bool) {
 	}
 	s.messages = msgs
 	s.messagesView.Clear()
+	s.messageRowIndex = s.messageRowIndex[:0]
 	_, _, width, _ := s.messagesView.GetInnerRect()
 	if width <= 0 {
 		width = 80
 	}
-	for _, m := range msgs {
+	for msgIdx, m := range msgs {
 		from := m.SenderJID
 		if m.FromMe {
 			from = "me"
@@ -731,6 +742,7 @@ func (s *tuiState) reloadMessages(keepSelection bool) {
 					out = fmt.Sprintf("%s  %s", ln, ts)
 				}
 				s.messagesView.AddItem(padLeft(out, width), "", 0, nil)
+				s.messageRowIndex = append(s.messageRowIndex, msgIdx)
 			}
 		} else {
 			fromLabel := truncate(from, 12)
@@ -744,9 +756,11 @@ func (s *tuiState) reloadMessages(keepSelection bool) {
 				line = truncate(line, width)
 				line = fmt.Sprintf("[#cba86a:#1e2124]%s[-:-:-]", line)
 				s.messagesView.AddItem(line, "", 0, nil)
+				s.messageRowIndex = append(s.messageRowIndex, msgIdx)
 			}
 		}
 		s.messagesView.AddItem("", "", 0, nil)
+		s.messageRowIndex = append(s.messageRowIndex, -1)
 	}
 	itemCount := s.messagesView.GetItemCount()
 	if keepSelection {
@@ -903,6 +917,95 @@ func (s *tuiState) messageText(m store.Message) string {
 		text = "(message)"
 	}
 	return text
+}
+
+func (s *tuiState) selectedMessage() (store.Message, bool) {
+	if len(s.messages) == 0 || len(s.messageRowIndex) == 0 {
+		return store.Message{}, false
+	}
+	row := s.messagesView.GetCurrentItem()
+	if row < 0 || row >= len(s.messageRowIndex) {
+		return store.Message{}, false
+	}
+	idx := s.messageRowIndex[row]
+	if idx < 0 {
+		for i := row - 1; i >= 0; i-- {
+			if s.messageRowIndex[i] >= 0 {
+				idx = s.messageRowIndex[i]
+				break
+			}
+		}
+	}
+	if idx < 0 || idx >= len(s.messages) {
+		return store.Message{}, false
+	}
+	return s.messages[idx], true
+}
+
+func (s *tuiState) previewSelectedImage() error {
+	msg, ok := s.selectedMessage()
+	if !ok {
+		return fmt.Errorf("no message selected")
+	}
+	if !strings.EqualFold(msg.MediaType, "image") {
+		return fmt.Errorf("selected message is not an image")
+	}
+	path := strings.TrimSpace(msg.LocalPath)
+	if path == "" {
+		ctx, cancel := withTimeout(context.Background(), s.flags)
+		defer cancel()
+		var err error
+		path, err = s.downloadImage(ctx, msg)
+		if err != nil {
+			return err
+		}
+	}
+	if _, err := os.Stat(path); err != nil {
+		return err
+	}
+
+	return s.app.Suspend(func() {
+		_ = termimg.Open(path).Scale(termimg.ScaleFit).Print()
+		fmt.Fprint(os.Stdout, "\nPress Enter to return...")
+		_, _ = bufio.NewReader(os.Stdin).ReadBytes('\n')
+		fmt.Fprint(os.Stdout, "\n")
+	})
+}
+
+func (s *tuiState) downloadImage(ctx context.Context, msg store.Message) (string, error) {
+	if s.wa == nil {
+		return "", fmt.Errorf("app not ready")
+	}
+	if err := s.wa.EnsureAuthed(); err != nil {
+		return "", err
+	}
+	if !s.wa.WA().IsConnected() {
+		if err := s.wa.Connect(ctx, false, nil); err != nil {
+			return "", err
+		}
+	}
+	info, err := s.wa.DB().GetMediaDownloadInfo(msg.ChatJID, msg.MsgID)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(info.DirectPath) == "" || len(info.MediaKey) == 0 {
+		return "", fmt.Errorf("no media metadata")
+	}
+	targetPath, err := s.wa.ResolveMediaOutputPath(info, "")
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0700); err != nil {
+		return "", err
+	}
+	if _, err := s.wa.WA().DownloadMediaToFile(ctx, info.DirectPath, info.FileEncSHA256, info.FileSHA256, info.MediaKey, info.FileLength, info.MediaType, "", targetPath); err != nil {
+		return "", err
+	}
+	now := time.Now().UTC()
+	if err := s.wa.DB().MarkMediaDownloaded(info.ChatJID, info.MsgID, targetPath, now); err != nil {
+		return "", err
+	}
+	return targetPath, nil
 }
 
 func (s *tuiState) pushNotification(n tuiNotification) {
@@ -1073,6 +1176,7 @@ func (s *tuiState) updateKeyBindings() {
 	lines := []string{
 		"[#cba86a]i[-]  send text",
 		"[#cba86a]f[-]  send file",
+		"[#cba86a]p[-]  preview image",
 		"[#cba86a]/[-]  search chats",
 		"[#cba86a]?[-]  search messages",
 		"[#cba86a]↑/↓[-] navigate (search/suggest)",
