@@ -42,7 +42,7 @@ func newGroupsInviteLinkGetCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
+			a, lk, err := newApp(ctx, flags, true, false, false)
 			if err != nil {
 				return err
 			}
@@ -85,7 +85,7 @@ func newGroupsInviteLinkRevokeCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
+			a, lk, err := newApp(ctx, flags, true, false, false)
 			if err != nil {
 				return err
 			}
@@ -128,7 +128,7 @@ func newGroupsJoinCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
+			a, lk, err := newApp(ctx, flags, true, false, false)
 			if err != nil {
 				return err
 			}

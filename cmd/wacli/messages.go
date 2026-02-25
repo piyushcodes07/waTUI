@@ -38,7 +38,7 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, false, false)
+			a, lk, err := newApp(ctx, flags, false, false, false)
 			if err != nil {
 				return err
 			}
@@ -132,7 +132,7 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, false, false)
+			a, lk, err := newApp(ctx, flags, false, false, false)
 			if err != nil {
 				return err
 			}
@@ -233,7 +233,7 @@ func newMessagesShowCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, false, false)
+			a, lk, err := newApp(ctx, flags, false, false, false)
 			if err != nil {
 				return err
 			}
@@ -289,7 +289,7 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, false, false)
+			a, lk, err := newApp(ctx, flags, false, false, false)
 			if err != nil {
 				return err
 			}

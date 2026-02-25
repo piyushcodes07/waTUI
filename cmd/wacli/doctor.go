@@ -41,7 +41,7 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 				lockHeld = true
 			}
 
-			a, lk, err := newApp(ctx, flags, connect, true)
+			a, lk, err := newApp(ctx, flags, connect, true, false)
 			if err != nil {
 				return err
 			}
