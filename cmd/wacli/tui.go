@@ -106,7 +106,7 @@ func newTuiCmd(flags *rootFlags) *cobra.Command {
 			defer cancel()
 
 			needLock := !noSync
-			a, lk, err := newApp(ctx, flags, needLock, true)
+			a, lk, err := newApp(ctx, flags, needLock, true, true)
 			if err != nil {
 				return err
 			}

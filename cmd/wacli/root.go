@@ -59,7 +59,7 @@ func execute(args []string) error {
 	return nil
 }
 
-func newApp(ctx context.Context, flags *rootFlags, needLock bool, allowUnauthed bool) (*app.App, *lock.Lock, error) {
+func newApp(ctx context.Context, flags *rootFlags, needLock bool, allowUnauthed bool, quietWA bool) (*app.App, *lock.Lock, error) {
 	storeDir := flags.storeDir
 	if storeDir == "" {
 		storeDir = config.DefaultStoreDir()
@@ -80,6 +80,7 @@ func newApp(ctx context.Context, flags *rootFlags, needLock bool, allowUnauthed 
 		Version:       version,
 		JSON:          flags.asJSON,
 		AllowUnauthed: allowUnauthed,
+		QuietWA:       quietWA,
 	})
 	if err != nil {
 		if lk != nil {
