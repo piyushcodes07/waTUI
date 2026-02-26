@@ -728,7 +728,7 @@ func (s *tuiState) reloadMessages(keepSelection bool) {
 			if local != "" {
 				text = "image | local: " + local
 			} else {
-				text = fmt.Sprintf("image | download: wacli media download --chat %s --id %s", m.ChatJID, m.MsgID)
+				text = "image | press p to preview (auto-download)"
 			}
 		} else if m.MediaType != "" && text == "" {
 			text = "Sent " + m.MediaType
