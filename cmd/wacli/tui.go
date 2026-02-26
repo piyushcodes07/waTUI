@@ -541,6 +541,15 @@ func maxIndex(count int) int {
 	return count - 1
 }
 
+func lastMessageRow(rows []int) int {
+	for i := len(rows) - 1; i >= 0; i-- {
+		if rows[i] >= 0 {
+			return i
+		}
+	}
+	return -1
+}
+
 func (s *tuiState) reloadChats() {
 	s.loadChats(false)
 }
@@ -763,15 +772,24 @@ func (s *tuiState) reloadMessages(keepSelection bool) {
 		s.messageRowIndex = append(s.messageRowIndex, -1)
 	}
 	itemCount := s.messagesView.GetItemCount()
+	lastMsgRow := lastMessageRow(s.messageRowIndex)
 	if keepSelection {
 		if s.followBottom || wasAtBottom {
-			s.messagesView.SetCurrentItem(maxIndex(itemCount))
+			if lastMsgRow >= 0 {
+				s.messagesView.SetCurrentItem(lastMsgRow)
+			} else {
+				s.messagesView.SetCurrentItem(maxIndex(itemCount))
+			}
 		} else {
 			s.messagesView.SetCurrentItem(clampIndex(prevIdx, itemCount))
 		}
 	} else {
 		s.followBottom = true
-		s.messagesView.SetCurrentItem(maxIndex(itemCount))
+		if lastMsgRow >= 0 {
+			s.messagesView.SetCurrentItem(lastMsgRow)
+		} else {
+			s.messagesView.SetCurrentItem(maxIndex(itemCount))
+		}
 	}
 	if len(msgs) > 0 {
 		s.lastRenderedChatTS[s.selectedChatJID] = msgs[len(msgs)-1].Timestamp
