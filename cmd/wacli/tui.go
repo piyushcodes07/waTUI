@@ -389,7 +389,7 @@ func (s *tuiState) wireKeys() {
 			s.setFocus("search")
 			return nil
 		case 'i':
-			if s.app.GetFocus() == s.messagesView {
+			if s.app.GetFocus() == s.messagesView || s.app.GetFocus() == s.chatsView {
 				s.mode = tuiModeSendText
 				s.inputView.SetLabel("msg: ")
 				s.inputView.SetText("")
@@ -398,7 +398,7 @@ func (s *tuiState) wireKeys() {
 				return nil
 			}
 		case 'f':
-			if s.app.GetFocus() == s.messagesView {
+			if s.app.GetFocus() == s.messagesView || s.app.GetFocus() == s.chatsView {
 				s.mode = tuiModeSendFile
 				s.inputView.SetLabel("file: ")
 				s.inputView.SetText("")
