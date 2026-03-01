@@ -32,6 +32,7 @@ type SyncOptions struct {
 	RefreshGroups   bool
 	IdleExit        time.Duration // only used for bootstrap/once
 	Verbosity       int           // future
+	Quiet           bool
 }
 
 type SyncResult struct {
@@ -48,6 +49,13 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 
 	if err := a.OpenWA(); err != nil {
 		return SyncResult{}, err
+	}
+
+	logf := func(format string, args ...any) {
+		if opts.Quiet {
+			return
+		}
+		fmt.Fprintf(os.Stderr, format, args...)
 	}
 
 	var messagesStored atomic.Int64
@@ -102,10 +110,10 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 				enqueueMedia(pm.Chat.String(), pm.ID)
 			}
 			if messagesStored.Load()%25 == 0 {
-				fmt.Fprintf(os.Stderr, "\rSynced %d messages...", messagesStored.Load())
+				logf("\rSynced %d messages...", messagesStored.Load())
 			}
 		case *events.HistorySync:
-			fmt.Fprintf(os.Stderr, "\nProcessing history sync (%d conversations)...\n", len(v.Data.Conversations))
+			logf("\nProcessing history sync (%d conversations)...\n", len(v.Data.Conversations))
 			for _, conv := range v.Data.Conversations {
 				lastEvent.Store(time.Now().UTC().UnixNano())
 				chatID := strings.TrimSpace(conv.GetID())
@@ -129,11 +137,11 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 					}
 				}
 			}
-			fmt.Fprintf(os.Stderr, "\rSynced %d messages...", messagesStored.Load())
+			logf("\rSynced %d messages...", messagesStored.Load())
 		case *events.Connected:
-			fmt.Fprintln(os.Stderr, "\nConnected.")
+			logf("\nConnected.\n")
 		case *events.Disconnected:
-			fmt.Fprintln(os.Stderr, "\nDisconnected.")
+			logf("\nDisconnected.\n")
 			select {
 			case disconnected <- struct{}{}:
 			default:
@@ -172,10 +180,10 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		for {
 			select {
 			case <-ctx.Done():
-				fmt.Fprintln(os.Stderr, "\nStopping sync.")
+				logf("\nStopping sync.\n")
 				return SyncResult{MessagesStored: messagesStored.Load()}, nil
 			case <-disconnected:
-				fmt.Fprintln(os.Stderr, "Reconnecting...")
+				logf("Reconnecting...\n")
 				if err := a.wa.ReconnectWithBackoff(ctx, 2*time.Second, 30*time.Second); err != nil {
 					return SyncResult{MessagesStored: messagesStored.Load()}, err
 				}
@@ -193,17 +201,17 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Fprintln(os.Stderr, "\nStopping sync.")
+			logf("\nStopping sync.\n")
 			return SyncResult{MessagesStored: messagesStored.Load()}, nil
 		case <-disconnected:
-			fmt.Fprintln(os.Stderr, "Reconnecting...")
+			logf("Reconnecting...\n")
 			if err := a.wa.ReconnectWithBackoff(ctx, 2*time.Second, 30*time.Second); err != nil {
 				return SyncResult{MessagesStored: messagesStored.Load()}, err
 			}
 		case <-ticker.C:
 			last := time.Unix(0, lastEvent.Load())
 			if time.Since(last) >= opts.IdleExit {
-				fmt.Fprintf(os.Stderr, "\nIdle for %s, exiting.\n", opts.IdleExit)
+				logf("\nIdle for %s, exiting.\n", opts.IdleExit)
 				return SyncResult{MessagesStored: messagesStored.Load()}, nil
 			}
 		}
@@ -223,19 +231,35 @@ func chatKind(chat types.JID) string {
 	return "unknown"
 }
 
+func normalizeChatJID(chat types.JID) types.JID {
+	if chat.Server == types.GroupServer || chat.IsBroadcastList() {
+		return chat
+	}
+	return chat.ToNonAD()
+}
+
 func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error {
-	chatJID := pm.Chat.String()
-	chatName := a.wa.ResolveChatName(ctx, pm.Chat, pm.PushName)
-	if err := a.db.UpsertChat(chatJID, chatKind(pm.Chat), chatName, pm.Timestamp); err != nil {
+	chat := normalizeChatJID(pm.Chat)
+	if pm.SenderJID != "" {
+		if jid, err := types.ParseJID(pm.SenderJID); err == nil {
+			jid = jid.ToNonAD()
+			pm.SenderJID = jid.String()
+		}
+	}
+	pm.Chat = chat
+
+	chatJID := chat.String()
+	chatName := a.wa.ResolveChatName(ctx, chat, pm.PushName)
+	if err := a.db.UpsertChat(chatJID, chatKind(chat), chatName, pm.Timestamp); err != nil {
 		return err
 	}
 
 	// Best-effort: store contact info for DMs.
-	if pm.Chat.Server == types.DefaultUserServer {
-		if info, err := a.wa.GetContact(ctx, pm.Chat.ToNonAD()); err == nil {
+	if chat.Server == types.DefaultUserServer {
+		if info, err := a.wa.GetContact(ctx, chat); err == nil {
 			_ = a.db.UpsertContact(
-				pm.Chat.String(),
-				pm.Chat.User,
+				chat.String(),
+				chat.User,
 				info.PushName,
 				info.FullName,
 				info.FirstName,
@@ -252,7 +276,8 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 	}
 	if pm.SenderJID != "" {
 		if jid, err := types.ParseJID(pm.SenderJID); err == nil {
-			if info, err := a.wa.GetContact(ctx, jid.ToNonAD()); err == nil {
+			jid = normalizeChatJID(jid)
+			if info, err := a.wa.GetContact(ctx, jid); err == nil {
 				if name := wa.BestContactName(info); name != "" {
 					senderName = name
 				}
@@ -269,8 +294,8 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 	}
 
 	// Best-effort: store group metadata (and participants) when available.
-	if pm.Chat.Server == types.GroupServer {
-		if gi, err := a.wa.GetGroupInfo(ctx, pm.Chat); err == nil && gi != nil {
+	if chat.Server == types.GroupServer {
+		if gi, err := a.wa.GetGroupInfo(ctx, chat); err == nil && gi != nil {
 			_ = a.db.UpsertGroup(gi.JID.String(), gi.GroupName.Name, gi.OwnerJID.String(), gi.GroupCreated)
 			var ps []store.GroupParticipant
 			for _, p := range gi.Participants {
@@ -281,12 +306,12 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 					role = "admin"
 				}
 				ps = append(ps, store.GroupParticipant{
-					GroupJID: pm.Chat.String(),
+					GroupJID: chat.String(),
 					UserJID:  p.JID.String(),
 					Role:     role,
 				})
 			}
-			_ = a.db.ReplaceGroupParticipants(pm.Chat.String(), ps)
+			_ = a.db.ReplaceGroupParticipants(chat.String(), ps)
 		}
 	}
 

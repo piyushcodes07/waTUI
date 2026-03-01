@@ -27,12 +27,12 @@ func execute(args []string) error {
 	var flags rootFlags
 
 	rootCmd := &cobra.Command{
-		Use:           "wacli",
+		Use:           "watui",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version,
 	}
-	rootCmd.SetVersionTemplate("wacli {{.Version}}\n")
+	rootCmd.SetVersionTemplate("watui {{.Version}}\n")
 
 	rootCmd.PersistentFlags().StringVar(&flags.storeDir, "store", "", "store directory (default: ~/.wacli)")
 	rootCmd.PersistentFlags().BoolVar(&flags.asJSON, "json", false, "output JSON instead of human-readable text")
@@ -49,6 +49,7 @@ func execute(args []string) error {
 	rootCmd.AddCommand(newChatsCmd(&flags))
 	rootCmd.AddCommand(newGroupsCmd(&flags))
 	rootCmd.AddCommand(newHistoryCmd(&flags))
+	rootCmd.AddCommand(newTuiCmd(&flags))
 
 	rootCmd.SetArgs(args)
 	if err := rootCmd.Execute(); err != nil {
@@ -58,7 +59,7 @@ func execute(args []string) error {
 	return nil
 }
 
-func newApp(ctx context.Context, flags *rootFlags, needLock bool, allowUnauthed bool) (*app.App, *lock.Lock, error) {
+func newApp(ctx context.Context, flags *rootFlags, needLock bool, allowUnauthed bool, quietWA bool) (*app.App, *lock.Lock, error) {
 	storeDir := flags.storeDir
 	if storeDir == "" {
 		storeDir = config.DefaultStoreDir()
@@ -79,6 +80,7 @@ func newApp(ctx context.Context, flags *rootFlags, needLock bool, allowUnauthed 
 		Version:       version,
 		JSON:          flags.asJSON,
 		AllowUnauthed: allowUnauthed,
+		QuietWA:       quietWA,
 	})
 	if err != nil {
 		if lk != nil {

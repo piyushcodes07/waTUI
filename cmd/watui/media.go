@@ -35,7 +35,7 @@ func newMediaDownloadCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
+			a, lk, err := newApp(ctx, flags, true, false, false)
 			if err != nil {
 				return err
 			}
@@ -50,7 +50,7 @@ func newMediaDownloadCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			if info.MediaType == "" || info.DirectPath == "" || len(info.MediaKey) == 0 {
-				return fmt.Errorf("message has no downloadable media metadata (run `wacli sync` first)")
+				return fmt.Errorf("message has no downloadable media metadata (run `watui sync` first)")
 			}
 
 			target, err := a.ResolveMediaOutputPath(info, outputPath)

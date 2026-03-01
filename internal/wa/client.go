@@ -20,6 +20,8 @@ import (
 
 type Options struct {
 	StorePath string
+	Logger    waLog.Logger
+	DBLogger  waLog.Logger
 }
 
 type Client struct {
@@ -45,7 +47,10 @@ func (c *Client) init() error {
 	defer c.mu.Unlock()
 
 	ctx := context.Background()
-	dbLog := waLog.Stdout("Database", "ERROR", true)
+	dbLog := c.opts.DBLogger
+	if dbLog == nil {
+		dbLog = waLog.Stdout("Database", "ERROR", true)
+	}
 	container, err := sqlstore.New(ctx, "sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", c.opts.StorePath), dbLog)
 	if err != nil {
 		return fmt.Errorf("open whatsmeow store: %w", err)
@@ -60,7 +65,10 @@ func (c *Client) init() error {
 		}
 	}
 
-	logger := waLog.Stdout("Client", "ERROR", true)
+	logger := c.opts.Logger
+	if logger == nil {
+		logger = waLog.Stdout("Client", "ERROR", true)
+	}
 	c.client = whatsmeow.NewClient(deviceStore, logger)
 	return nil
 }
@@ -104,7 +112,7 @@ func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
 
 	authed := cli.Store != nil && cli.Store.ID != nil
 	if !authed && !opts.AllowQR {
-		return fmt.Errorf("not authenticated; run `wacli auth`")
+		return fmt.Errorf("not authenticated; run `watui auth`")
 	}
 
 	var qrChan <-chan whatsmeow.QRChannelItem
@@ -236,7 +244,7 @@ func (c *Client) RequestHistorySyncOnDemand(ctx context.Context, lastKnown types
 		ownID = cli.Store.ID.ToNonAD()
 	}
 	if ownID.IsEmpty() {
-		return "", fmt.Errorf("not authenticated; run `wacli auth`")
+		return "", fmt.Errorf("not authenticated; run `watui auth`")
 	}
 
 	msg := cli.BuildHistorySyncRequest(&lastKnown, count)

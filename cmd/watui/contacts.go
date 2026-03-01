@@ -34,7 +34,7 @@ func newContactsSearchCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, false, false)
+			a, lk, err := newApp(ctx, flags, false, false, false)
 			if err != nil {
 				return err
 			}
@@ -79,7 +79,7 @@ func newContactsShowCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, false, false)
+			a, lk, err := newApp(ctx, flags, false, false, false)
 			if err != nil {
 				return err
 			}
@@ -122,7 +122,7 @@ func newContactsRefreshCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, true)
+			a, lk, err := newApp(ctx, flags, true, true, false)
 			if err != nil {
 				return err
 			}
@@ -175,7 +175,7 @@ func newContactsAliasCmd(flags *rootFlags) *cobra.Command {
 			}
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
-			a, lk, err := newApp(ctx, flags, false, false)
+			a, lk, err := newApp(ctx, flags, false, false, false)
 			if err != nil {
 				return err
 			}
@@ -200,7 +200,7 @@ func newContactsAliasCmd(flags *rootFlags) *cobra.Command {
 			}
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
-			a, lk, err := newApp(ctx, flags, false, false)
+			a, lk, err := newApp(ctx, flags, false, false, false)
 			if err != nil {
 				return err
 			}
@@ -237,7 +237,7 @@ func newContactsTagsCmd(flags *rootFlags) *cobra.Command {
 			}
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
-			a, lk, err := newApp(ctx, flags, false, false)
+			a, lk, err := newApp(ctx, flags, false, false, false)
 			if err != nil {
 				return err
 			}
@@ -263,7 +263,7 @@ func newContactsTagsCmd(flags *rootFlags) *cobra.Command {
 			}
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
-			a, lk, err := newApp(ctx, flags, false, false)
+			a, lk, err := newApp(ctx, flags, false, false, false)
 			if err != nil {
 				return err
 			}

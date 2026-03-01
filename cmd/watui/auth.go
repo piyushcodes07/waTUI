@@ -26,7 +26,7 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
-			a, lk, err := newApp(ctx, flags, true, true)
+			a, lk, err := newApp(ctx, flags, true, true, false)
 			if err != nil {
 				return err
 			}
@@ -85,7 +85,7 @@ func newAuthStatusCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, false, true)
+			a, lk, err := newApp(ctx, flags, false, true, false)
 			if err != nil {
 				return err
 			}
@@ -104,7 +104,7 @@ func newAuthStatusCmd(flags *rootFlags) *cobra.Command {
 			if authed {
 				fmt.Fprintln(os.Stdout, "Authenticated.")
 			} else {
-				fmt.Fprintln(os.Stdout, "Not authenticated. Run `wacli auth`.")
+				fmt.Fprintln(os.Stdout, "Not authenticated. Run `watui auth`.")
 			}
 			return nil
 		},
@@ -119,7 +119,7 @@ func newAuthLogoutCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, true)
+			a, lk, err := newApp(ctx, flags, true, true, false)
 			if err != nil {
 				return err
 			}

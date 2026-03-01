@@ -41,7 +41,7 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 				lockHeld = true
 			}
 
-			a, lk, err := newApp(ctx, flags, connect, true)
+			a, lk, err := newApp(ctx, flags, connect, true, false)
 			if err != nil {
 				return err
 			}
@@ -92,7 +92,7 @@ func newDoctorCmd(flags *rootFlags) *cobra.Command {
 			_ = w.Flush()
 
 			if rep.LockHeld {
-				fmt.Fprintln(os.Stdout, "\nTip: stop the running `wacli sync` before running write operations.")
+				fmt.Fprintln(os.Stdout, "\nTip: stop the running `watui sync` before running write operations.")
 			}
 			return nil
 		},

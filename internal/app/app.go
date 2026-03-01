@@ -13,6 +13,7 @@ import (
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
 type WAClient interface {
@@ -52,6 +53,7 @@ type Options struct {
 	Version       string
 	JSON          bool
 	AllowUnauthed bool
+	QuietWA       bool
 }
 
 type App struct {
@@ -83,9 +85,12 @@ func (a *App) OpenWA() error {
 		return nil
 	}
 	sessionPath := filepath.Join(a.opts.StoreDir, "session.db")
-	cli, err := wa.New(wa.Options{
-		StorePath: sessionPath,
-	})
+	waOpts := wa.Options{StorePath: sessionPath}
+	if a.opts.QuietWA {
+		waOpts.Logger = waLog.Noop
+		waOpts.DBLogger = waLog.Noop
+	}
+	cli, err := wa.New(waOpts)
 	if err != nil {
 		return err
 	}
@@ -110,7 +115,7 @@ func (a *App) EnsureAuthed() error {
 	if a.wa.IsAuthed() {
 		return nil
 	}
-	return fmt.Errorf("not authenticated; run `wacli auth`")
+	return fmt.Errorf("not authenticated; run `watui auth`")
 }
 
 func (a *App) WA() WAClient        { return a.wa }

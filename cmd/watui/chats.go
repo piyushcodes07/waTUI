@@ -31,7 +31,7 @@ func newChatsListCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, false, false)
+			a, lk, err := newApp(ctx, flags, false, false, false)
 			if err != nil {
 				return err
 			}
@@ -75,7 +75,7 @@ func newChatsShowCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, false, false)
+			a, lk, err := newApp(ctx, flags, false, false, false)
 			if err != nil {
 				return err
 			}
