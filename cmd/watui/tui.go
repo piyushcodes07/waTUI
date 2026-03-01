@@ -131,7 +131,7 @@ func newTuiCmd(flags *rootFlags) *cobra.Command {
 						Mode:            appPkg.SyncModeFollow,
 						AllowQR:         false,
 						DownloadMedia:   syncDownloadMedia,
-						RefreshContacts: syncRefreshContacts,
+						RefreshContacts: true,
 						RefreshGroups:   syncRefreshGroups,
 						Quiet:           true,
 					})
