@@ -1,45 +1,57 @@
 # watui
 
-A fast WhatsApp CLI + TUI built on top of `whatsmeow`.
+WhatsApp in your terminal.
 
-## What it does
-- Syncs messages into a local SQLite store
-- Search, list, and send messages
-- Read‑only TUI with live sync
+`watui` is a local-first CLI + TUI built on `whatsmeow`.
 
-> This is a third‑party client using WhatsApp Web protocol. Not affiliated with WhatsApp.
+## Features
+- Live sync with local SQLite storage
+- Fast message search
+- Terminal TUI for reading chats
+- Send text and files
+- Image preview from TUI (`p`, auto-download if needed)
+- Contacts and groups management
 
-## Build
+## Build (local)
 ```bash
 go build -tags sqlite_fts5 -o ./dist/watui ./cmd/watui
 ```
 
 ## Quick start
 ```bash
-# Authenticate (QR)
+# 1) Login (QR)
 ./dist/watui auth
 
-# Start TUI (auto sync in background)
+# 2) Open TUI (auto-sync starts)
 ./dist/watui tui
-
-# Keep syncing without TUI
-./dist/watui sync --follow
 ```
 
-## Useful commands
+## Common commands
 ```bash
+# Keep syncing in terminal
+./dist/watui sync --follow
+
 # Search messages
-./dist/watui messages search "meeting"
+./dist/watui messages search "hello"
 
 # Send text
-./dist/watui send text --to 1234567890 --message "hello"
+./dist/watui send text --to 1234567890 --message "hi"
 
 # Send file
-./dist/watui send file --to 1234567890 --file ./pic.jpg
+./dist/watui send file --to 1234567890 --file ./photo.jpg
+
+# Refresh contacts
+./dist/watui contacts refresh
 ```
 
-## Storage
-Default store is `~/.wacli` (override with `--store DIR`).
+## Store
+Default store: `~/.wacli`
 
-## License
-MIT
+Override with:
+```bash
+./dist/watui --store /path/to/store ...
+```
+
+## Notes
+- Third-party client. Not affiliated with WhatsApp.
+- Uses WhatsApp Web protocol via `whatsmeow`.
