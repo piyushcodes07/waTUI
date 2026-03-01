@@ -1,4 +1,4 @@
-# wacli
+# watui
 
 A fast WhatsApp CLI + TUI built on top of `whatsmeow`.
 
@@ -11,31 +11,31 @@ A fast WhatsApp CLI + TUI built on top of `whatsmeow`.
 
 ## Build
 ```bash
-go build -tags sqlite_fts5 -o ./dist/wacli ./cmd/wacli
+go build -tags sqlite_fts5 -o ./dist/watui ./cmd/watui
 ```
 
 ## Quick start
 ```bash
 # Authenticate (QR)
-./dist/wacli auth
+./dist/watui auth
 
 # Start TUI (auto sync in background)
-./dist/wacli tui
+./dist/watui tui
 
 # Keep syncing without TUI
-./dist/wacli sync --follow
+./dist/watui sync --follow
 ```
 
 ## Useful commands
 ```bash
 # Search messages
-./dist/wacli messages search "meeting"
+./dist/watui messages search "meeting"
 
 # Send text
-./dist/wacli send text --to 1234567890 --message "hello"
+./dist/watui send text --to 1234567890 --message "hello"
 
 # Send file
-./dist/wacli send file --to 1234567890 --file ./pic.jpg
+./dist/watui send file --to 1234567890 --file ./pic.jpg
 ```
 
 ## Storage

@@ -116,7 +116,7 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 				oldest, err := a.db.GetOldestMessageInfo(chatStr)
 				if err != nil {
 					if err == sql.ErrNoRows {
-						return fmt.Errorf("no messages for %s in local DB; run `wacli sync` first", chatStr)
+						return fmt.Errorf("no messages for %s in local DB; run `watui sync` first", chatStr)
 					}
 					return err
 				}

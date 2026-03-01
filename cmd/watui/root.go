@@ -27,12 +27,12 @@ func execute(args []string) error {
 	var flags rootFlags
 
 	rootCmd := &cobra.Command{
-		Use:           "wacli",
+		Use:           "watui",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version,
 	}
-	rootCmd.SetVersionTemplate("wacli {{.Version}}\n")
+	rootCmd.SetVersionTemplate("watui {{.Version}}\n")
 
 	rootCmd.PersistentFlags().StringVar(&flags.storeDir, "store", "", "store directory (default: ~/.wacli)")
 	rootCmd.PersistentFlags().BoolVar(&flags.asJSON, "json", false, "output JSON instead of human-readable text")

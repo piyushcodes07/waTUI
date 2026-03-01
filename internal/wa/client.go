@@ -112,7 +112,7 @@ func (c *Client) Connect(ctx context.Context, opts ConnectOptions) error {
 
 	authed := cli.Store != nil && cli.Store.ID != nil
 	if !authed && !opts.AllowQR {
-		return fmt.Errorf("not authenticated; run `wacli auth`")
+		return fmt.Errorf("not authenticated; run `watui auth`")
 	}
 
 	var qrChan <-chan whatsmeow.QRChannelItem
@@ -244,7 +244,7 @@ func (c *Client) RequestHistorySyncOnDemand(ctx context.Context, lastKnown types
 		ownID = cli.Store.ID.ToNonAD()
 	}
 	if ownID.IsEmpty() {
-		return "", fmt.Errorf("not authenticated; run `wacli auth`")
+		return "", fmt.Errorf("not authenticated; run `watui auth`")
 	}
 
 	msg := cli.BuildHistorySyncRequest(&lastKnown, count)

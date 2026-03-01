@@ -123,7 +123,7 @@ func newTuiCmd(flags *rootFlags) *cobra.Command {
 				state.setSyncStatus("starting")
 				go func() {
 					if err := a.EnsureAuthed(); err != nil {
-						state.setSyncStatus("unauth (run wacli auth)")
+						state.setSyncStatus("unauth (run watui auth)")
 						return
 					}
 					state.setSyncStatus("running")

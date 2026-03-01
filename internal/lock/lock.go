@@ -30,9 +30,9 @@ func Acquire(storeDir string) (*Lock, error) {
 		_ = f.Close()
 		info := strings.TrimSpace(string(b))
 		if info != "" {
-			return nil, fmt.Errorf("store is locked (another wacli is running?): %w (%s)", err, info)
+			return nil, fmt.Errorf("store is locked (another watui is running?): %w (%s)", err, info)
 		}
-		return nil, fmt.Errorf("store is locked (another wacli is running?): %w", err)
+		return nil, fmt.Errorf("store is locked (another watui is running?): %w", err)
 	}
 
 	_ = f.Truncate(0)

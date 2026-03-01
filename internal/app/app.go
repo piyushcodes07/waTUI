@@ -115,7 +115,7 @@ func (a *App) EnsureAuthed() error {
 	if a.wa.IsAuthed() {
 		return nil
 	}
-	return fmt.Errorf("not authenticated; run `wacli auth`")
+	return fmt.Errorf("not authenticated; run `watui auth`")
 }
 
 func (a *App) WA() WAClient        { return a.wa }

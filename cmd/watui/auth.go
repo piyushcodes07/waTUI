@@ -104,7 +104,7 @@ func newAuthStatusCmd(flags *rootFlags) *cobra.Command {
 			if authed {
 				fmt.Fprintln(os.Stdout, "Authenticated.")
 			} else {
-				fmt.Fprintln(os.Stdout, "Not authenticated. Run `wacli auth`.")
+				fmt.Fprintln(os.Stdout, "Not authenticated. Run `watui auth`.")
 			}
 			return nil
 		},
